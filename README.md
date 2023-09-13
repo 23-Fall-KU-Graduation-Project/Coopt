@@ -1,17 +1,15 @@
 # Coopt
 23-Fall Konkuk University CSE Graduation Project
 
-
 # Member
-- 이관희, [kwan7595](https://github.com/kwan7595) 팀장
+- 이관희, [kwan7595](https://github.com/kwan7595), Lead
 - 김수환, [drrobot333](https://github.com/drrobot333)
 - 김환희, [khhandrea](https://github.com/khhandrea)
 
 ## Study
   - Weekly Study - place each files under Study
      - format : Week[n]_name_title.*
-     - commit msg : Week[n]_name
-
+     - Pull Request / Commit msg : Add Week[n]_study
 
 ## Papers
 - [Bayesian Neural Networks: An Introduction and Survey](https://arxiv.org/abs/2006.12024) , Survey
