@@ -14,7 +14,7 @@
 
 ## Study
   - Weekly Study - place each files under Study
-     - foramt : Week[n]_name_title.*
+     - format : Week[n]_name_title.*
 
 ## Code
 
