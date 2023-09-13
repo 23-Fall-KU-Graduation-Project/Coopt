@@ -7,16 +7,15 @@
 - 김수환, [drrobot333](https://github.com/drrobot333)
 - 김환희, [khhandrea](https://github.com/khhandrea)
 
-## Description
-
-## Papers
-
-
 ## Study
   - Weekly Study - place each files under Study
      - format : Week[n]_name_title.*
 
-## Code
+
+## Papers
+- [Bayesian Neural Networks: An Introduction and Survey](https://arxiv.org/abs/2006.12024) , Survey
+- [Stochastic Local Winner-Takes-All Networks Enable Profound Adversarial Robustness](https://arxiv.org/abs/2112.02671), NeurIPS 21'
+- [Sharpness-Aware Minimization for Efficiently Improving Generalization](https://arxiv.org/abs/2010.01412), ICLR 21'
 
 
 ## Links
