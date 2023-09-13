@@ -10,6 +10,7 @@
 ## Study
   - Weekly Study - place each files under Study
      - format : Week[n]_name_title.*
+     - commit msg : Week[n]_name
 
 
 ## Papers
