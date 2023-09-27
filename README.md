@@ -16,6 +16,7 @@
 - [Stochastic Local Winner-Takes-All Networks Enable Profound Adversarial Robustness](https://arxiv.org/abs/2112.02671), NeurIPS 21'
 - [Sharpness-Aware Minimization for Efficiently Improving Generalization](https://arxiv.org/abs/2010.01412), ICLR 21'
 - [Robustness of Bayesian Neural Networks to Gradient-Based Attaks](https://arxiv.org/abs/2002.04359), NeurIPS 20'
+- [SGD with Large Step Sizes Learns Sparse Features](https://proceedings.mlr.press/v202/andriushchenko23b.html), ICML 23'
 
 
 ## Links
