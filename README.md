@@ -17,7 +17,8 @@
 - [Sharpness-Aware Minimization for Efficiently Improving Generalization](https://arxiv.org/abs/2010.01412), ICLR 21'
 - [Robustness of Bayesian Neural Networks to Gradient-Based Attaks](https://arxiv.org/abs/2002.04359), NeurIPS 20'
 - [SGD with Large Step Sizes Learns Sparse Features](https://proceedings.mlr.press/v202/andriushchenko23b.html), ICML 23'
-
+- [SWAD: Domain Generalization by Seeking Flat Minima](https://arxiv.org/abs/2102.08604), NeurIPS 21'
+- [On the Geometry of Adversarial Examples](https://arxiv.org/abs/1811.00525), ArXiv 18'
 
 ## Links
 [OneDrive](https://konkukackr-my.sharepoint.com/:f:/r/personal/kwan7595_konkuk_ac_kr/Documents/kwan/2023-2/%EC%A1%B8%EC%97%85%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B81?csf=1&web=1&e=dO1QsE)
