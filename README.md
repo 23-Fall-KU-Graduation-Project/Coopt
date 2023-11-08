@@ -19,6 +19,7 @@
 - [SGD with Large Step Sizes Learns Sparse Features](https://proceedings.mlr.press/v202/andriushchenko23b.html), ICML 23'
 - [SWAD: Domain Generalization by Seeking Flat Minima](https://arxiv.org/abs/2102.08604), NeurIPS 21'
 - [On the Geometry of Adversarial Examples](https://arxiv.org/abs/1811.00525), ArXiv 18'
+- [Sharpness-Aware Minimization Alone can Improve Adversarial Robustness](https://arxiv.org/pdf/2305.05392.pdf), AdvML Frontiers Workshop @ ICML 23'
 
 ## Links
 [OneDrive](https://konkukackr-my.sharepoint.com/:f:/r/personal/kwan7595_konkuk_ac_kr/Documents/kwan/2023-2/%EC%A1%B8%EC%97%85%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B81?csf=1&web=1&e=dO1QsE)
