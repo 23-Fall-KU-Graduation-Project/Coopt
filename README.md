@@ -11,7 +11,7 @@
      - format : Week[n]_name_title.*
      - Pull Request / Commit msg : Add Week[n]_study
 
-## Papers
+## References
 - [Bayesian Neural Networks: An Introduction and Survey](https://arxiv.org/abs/2006.12024) , Survey
 - [Stochastic Local Winner-Takes-All Networks Enable Profound Adversarial Robustness](https://arxiv.org/abs/2112.02671), NeurIPS 21'
 - [Sharpness-Aware Minimization for Efficiently Improving Generalization](https://arxiv.org/abs/2010.01412), ICLR 21'
@@ -22,6 +22,7 @@
 - [Sharpness-Aware Minimization Alone can Improve Adversarial Robustness](https://arxiv.org/pdf/2305.05392.pdf), AdvML Frontiers Workshop @ ICML 23'
 - [Interpreting Adversarial Robustness: A View from Decision Surface in Input Space](https://arxiv.org/abs/1810.00144), ICLR 19'
 - [Adversarial Weight Perturbation Helps Robust Generalization](https://arxiv.org/abs/2004.05884), NIPS 20’
+- [Theoretically Principled Trade-off between Robustness and Accuracy](https://arxiv.org/abs/1901.08573), ICML 20'
 
 
 ## Links
