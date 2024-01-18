@@ -12,10 +12,54 @@ from utility.bypass_bn import enable_running_stats, disable_running_stats
 from utility.meters import get_meters,Meter,ScalarMeter,flush_scalar_meters
 import sys; sys.path.append("..")
 from sam import SAM
-from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm
+from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm, AT_VAL
 from tensorboardX import SummaryWriter
 
 global writer
+
+def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
+    corrects = 0
+    for batch_idx,batch in enumerate(dataset.train):
+        optimizer.zero_grad()
+        enable_running_stats(model)
+        x_natural, y = (b.to(device) for b in batch)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,args,x_natural,y,optimizer)
+        train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
+        train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
+        #loss.backward()
+        #optimizer.step()
+
+        with torch.no_grad():
+            #acc calculation
+            adv_correct = torch.argmax(adv_pred.data,1) == y
+            correct = torch.argmax(pred.data, 1) == y
+            _, top_adv_correct = adv_pred.topk(5)
+            _, top_correct = pred.topk(5)
+            top_adv_correct = top_adv_correct.t()
+            top_correct = top_correct.t()
+            top_adv_corrects = top_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
+            corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
+            for k in range(5):
+                adv_correct_k = top_adv_corrects[:k].float().sum(0)
+                correct_k = corrects[:k].float().sum(0)
+                adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
+                acc_list = list(correct_k.cpu().detach().numpy())
+                train_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
+                train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+            scheduler(epoch) # for default lr scheduler
+            # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
+        if (batch_idx % 10) == 0:
+            print(
+                "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
+                        epoch, batch_idx, len(dataset.train), loss_natural.item(),loss_robust.item(),adv_correct.float().mean().item(),
+                        correct.float().mean().item()
+                    )
+            )
+    results = flush_scalar_meters(val_meters)
+    for k, v in results.items():
+        if k != "best_val":
+            writer.add_scalar("train" + "/" + k, v, epoch)
+    writer.add_scalar("train"+"/lr",scheduler.lr(),epoch)
 
 def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
     model.train()
@@ -54,7 +98,7 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
             for k in range(5):
                 correct_k = corrects[:k].float().sum(0)
                 acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
+                train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
             log(model, loss.cpu(), correct.cpu(), scheduler.lr())
             scheduler(epoch) # for default lr scheduler
             #scheduler.step() # for cosineif (batch_idx % 10) == 0:
@@ -65,19 +109,44 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
     writer.add_scalar("train"+"/lr",scheduler.lr(),epoch)
 
 def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
-    if args.bilevel: # SAM + AT or SAM + TRADES, bilevel optimization
-        model.eval()
-        #log.eval(len_dataset=len(dataset.test))
-        corrects = 0
+         # Single level optimization (SAM,ADAM,SGD)
+    model.eval()
+    log.eval(len_dataset=len(dataset.test))
+
+    with torch.no_grad():
         for batch_idx,batch in enumerate(dataset.test):
-            optimizer.zero_grad()
-            enable_running_stats(model)
-            x_natural, y = (b.to(device) for b in batch)
-            loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,args,x_natural,y,optimizer)
+            inputs, targets = (b.to(device) for b in batch)
+
+            predictions = model(inputs)
+            loss = smooth_crossentropy(predictions, targets)
+            val_meters["CELoss"].cache((loss.sum()/loss.size(0)).cpu().detach().numpy())
+            correct = torch.argmax(predictions.data, 1) == targets
+            _, top_correct = predictions.topk(5)
+            top_correct = top_correct.t()
+            corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
+            for k in range(5):
+                correct_k = corrects[:k].float().sum(0)
+                acc_list = list(correct_k.cpu().detach().numpy())
+                val_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+            log(model, loss.cpu(), correct.cpu())
+            
+    results = flush_scalar_meters(val_meters)
+    for k, v in results.items():
+        if k != "best_val":
+            writer.add_scalar("val" + "/" + k, v, epoch)
+    writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
+    return results
+
+def adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
+    model.eval()
+    #log.eval(len_dataset = len(dataset.test))
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(dataset.test):
+            x_natural,y = (b.to(device) for b in batch)
+            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,args,x_natural,y,optimizer)
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
-            loss.backward()
-            optimizer.step()
             with torch.no_grad():
                 #acc calculation
                 adv_correct = torch.argmax(adv_pred.data,1) == y
@@ -86,57 +155,29 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
                 _, top_correct = pred.topk(5)
                 top_adv_correct = top_adv_correct.t()
                 top_correct = top_correct.t()
-                top_adv_corrects = top_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
+                top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
                 corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
                 for k in range(5):
                     adv_correct_k = top_adv_corrects[:k].float().sum(0)
                     correct_k = corrects[:k].float().sum(0)
                     adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
                     acc_list = list(correct_k.cpu().detach().numpy())
-                    val_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
-                    val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
+                    val_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
+                    val_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
                 # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
             if (batch_idx % 10) == 0:
                 print(
                     "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
-                            epoch, batch_idx, len(dataset.test), loss_natural.item(),loss_robust.item(),adv_correct.float().mean().item(),
-                            correct.float().mean().item()
+                            epoch, batch_idx, len(dataset.test), loss_natural.item(),loss_robust.item(),correct.float().mean().item(),
+                            adv_correct.float().mean().item()
                         )
                 )
-        results = flush_scalar_meters(val_meters)
-        for k, v in results.items():
-            if k != "best_val":
-                writer.add_scalar("val" + "/" + k, v, epoch)
-        writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
-
-    else: # Single level optimization (SAM,ADAM,SGD)
-        model.eval()
-        log.eval(len_dataset=len(dataset.test))
-
-        with torch.no_grad():
-            for batch in dataset.test:
-                inputs, targets = (b.to(device) for b in batch)
-
-                predictions = model(inputs)
-                loss = smooth_crossentropy(predictions, targets)
-                val_meters["CELoss"].cache((loss.sum()/loss.size(0)).cpu().detach().numpy())
-                correct = torch.argmax(predictions.data, 1) == targets
-                _, top_correct = predictions.topk(5)
-                top_correct = top_correct.t()
-                corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
-                for k in range(5):
-                    correct_k = corrects[:k].float().sum(0)
-                    acc_list = list(correct_k.cpu().detach().numpy())
-                    val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-                log(model, loss.cpu(), correct.cpu())
-                
-        results = flush_scalar_meters(val_meters)
-        for k, v in results.items():
-            if k != "best_val":
-                writer.add_scalar("train" + "/" + k, v, epoch)
-        writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
+    results = flush_scalar_meters(val_meters)
+    for k, v in results.items():
+        if k != "best_val":
+            writer.add_scalar("adv_val" + "/" + k, v, epoch)
+    writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
     return results
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -163,8 +204,8 @@ if __name__ == "__main__":
     dataset = Cifar(args.batch_size, args.threads)
     log = Log(log_each=10)
     model = WideResNet(args.depth, args.width_factor, args.dropout, in_channels=3, labels=10).to(device)
-    writer = SummaryWriter(log_dir = "./samat/runs") # directory for tensorboard logs
-    log_dir = "./samat/best_checkpoint" # directory for model checkpoints
+    writer = SummaryWriter(log_dir = "../test/runs") # directory for tensorboard logs
+    log_dir = "../test/best_checkpoint" # directory for model checkpoints
     train_meters = get_meters("train",model)
     val_meters = get_meters("val",model)
     val_meters["best_val"] = ScalarMeter("best_val")
@@ -186,22 +227,29 @@ if __name__ == "__main__":
     scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
         
     for epoch in range(args.epochs):
-        train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler) # train
-        
         val_meters["best_val"].cache(best_val)
         if args.bilevel:
-            results = val(model,log,dataset,val_meters,bilevel_optim,bilevel_scheduler,epoch)
-        else:
-            results = val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
-        if results["top1_accuracy"] > best_val:
-            best_val = results["top1_accuracy"]
-        torch.save(model, os.path.join(log_dir, "best.pth"))
+            if epoch%2==0: # train
+                train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
+            else: # adv train
+                adv_train(args,model,log,device,dataset,bilevel_optim,train_meters,epoch,bilevel_scheduler)
+            results = adv_val(model,log,dataset,val_meters,bilevel_optim,bilevel_scheduler,epoch)
+            if results["top1_accuracy"] > best_val:
+                best_val = results["top1_accuracy"]
+                torch.save(model, os.path.join(log_dir, "best.pth"))
+        else: # normal training
+            adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
+            #train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
+            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
+            if results["top1_accuracy"] > best_val:
+                best_val = results["top1_accuracy"]
+                torch.save(model, os.path.join(log_dir, "best.pth"))
         
         writer.add_scalar("val/best_val", best_val, epoch)
         if epoch ==0 or (epoch+1) % 10 == 0:
                 torch.save(
                     model,
-                    os.path.join("./samat/checkpoint","epoch_{}.pth".format(epoch))
+                    os.path.join("../test/checkpoint","epoch_{}.pth".format(epoch))
                 )
 
     log.flush()
