@@ -92,7 +92,7 @@ def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,tr
                 acc_list = list(correct_k.cpu().detach().numpy())
                 train_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
                 train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
-            scheduler(epoch) # for default lr scheduler
+            #scheduler(epoch) # not using scheduler ..
             # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
         if (batch_idx % 10) == 0:
             print(
@@ -281,25 +281,25 @@ if __name__ == "__main__":
     if args.sgd: # use sgd
         optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay,momentum=args.momentum)
         print("using sgd")
-    elif args.adam:
+    elif args.adam: # ADAM
         optimizer = torch.optim.Adam(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay)
         print("using adam")
-    elif args.sgdadam:
+    elif args.sgdadam: # A2GN
         optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay,momentum=args.momentum)
         optimizer_adam = torch.optim.Adam(model.parameters(),lr=0.01)
         print("using SGD & ADAM")
-    else:
+    else: # SAM
         optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho, adaptive=args.adaptive, lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         print("using SAM")
     
-    if args.bilevel:
+    if args.bilevel: #bilevel
         bilevel_optim = torch.optim.SGD(model.parameters(),lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         bilevel_scheduler = StepLR(bilevel_optim,args.learning_rate,args.epochs)
     scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
         
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
-        if args.bilevel:
+        if args.bilevel: # bilevel training
             if epoch%2==0: # train
                 train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
             else: # adv train
@@ -308,13 +308,15 @@ if __name__ == "__main__":
             if results["top1_accuracy"] > best_val:
                 best_val = results["top1_accuracy"]
                 torch.save(model, os.path.join(log_prefix,"best_checkpoint", "best.pth"))
-        elif args.sgdadam:
+
+        elif args.sgdadam: #A2GN
             adv_adam_train(args,model,log,device,dataset,optimizer,optimizer_adam,train_meters,epoch,scheduler)
             results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
             if results["top1_accuracy"] > best_val:
                     best_val = results["top1_accuracy"]
                     torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
-        else: # normal training
+
+        else: # SAMAT or TRADESAM - requires option
             adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
             #train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
             results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
