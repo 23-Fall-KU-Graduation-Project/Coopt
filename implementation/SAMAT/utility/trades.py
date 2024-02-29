@@ -190,10 +190,9 @@ def AT_TRAIN(model,args,
     #loss_natural = F.cross_entropy(logits, y)
     predictions = model(x_natural)
     # first forward-backward step - SAMAT / SAMTRADES
-    natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing)
-    natural_loss = natural_loss.mean()
+    natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
     #train_meters["CELoss"].cache((loss_sam.sum()/loss_sam.size(0)).cpu().detach().numpy())
-    natural_loss.mean().backward() #+ adv loss 
+    natural_loss.backward() #+ adv loss 
     optimizer.first_step(zero_grad=True)
     if args.trades:
         loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),F.softmax(model(x_natural), dim=1))
