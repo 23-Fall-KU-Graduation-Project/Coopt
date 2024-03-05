@@ -14,13 +14,13 @@ class Cifar:
             torchvision.transforms.RandomCrop(size=(32, 32), padding=4),
             torchvision.transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(mean, std),
+            #transforms.Normalize(mean, std),
             Cutout()
         ])
 
         test_transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(mean, std)
+            #transforms.Normalize(mean, std)
         ])
 
         train_set = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=train_transform)

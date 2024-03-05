@@ -40,13 +40,13 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
             top_correct = top_correct.t()
             top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
             corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
-            for k in range(5):
+            for k in range(1,5):
                 adv_correct_k = top_adv_corrects[:k].float().sum(0)
                 correct_k = corrects[:k].float().sum(0)
                 adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
                 acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
-                train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+                train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
+                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             scheduler(epoch) # for default lr scheduler
             # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
         if (batch_idx % 10) == 0:
@@ -85,20 +85,20 @@ def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,tr
             top_correct = top_correct.t()
             top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
             corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
-            for k in range(5):
+            for k in range(1,5):
                 adv_correct_k = top_adv_corrects[:k].float().sum(0)
                 correct_k = corrects[:k].float().sum(0)
                 adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
                 acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
-                train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+                train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
+                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             #scheduler(epoch) # not using scheduler ..
             # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
         if (batch_idx % 10) == 0:
             print(
                 "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
-                        epoch, batch_idx, len(dataset.train), loss_natural.item(),loss_robust.item(),adv_correct.float().mean().item(),
-                        correct.float().mean().item()
+                        epoch, batch_idx, len(dataset.train), loss_natural.item(),loss_robust.item(),
+                        correct.float().mean().item(),adv_correct.float().mean().item()
                     )
             )
     results = flush_scalar_meters(train_meters)
@@ -141,10 +141,10 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
             _, top_correct = predictions.topk(5)
             top_correct = top_correct.t()
             corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
-            for k in range(5):
+            for k in range(1,5):
                 correct_k = corrects[:k].float().sum(0)
                 acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             log(model, loss.cpu(), correct.cpu(), scheduler.lr())
             scheduler(epoch) # for default lr scheduler
             #scheduler.step() # for cosineif (batch_idx % 10) == 0:
@@ -170,10 +170,10 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
             _, top_correct = predictions.topk(5)
             top_correct = top_correct.t()
             corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
-            for k in range(5):
+            for k in range(1,5):
                 correct_k = corrects[:k].float().sum(0)
                 acc_list = list(correct_k.cpu().detach().numpy())
-                val_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+                val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             log(model, loss.cpu(), correct.cpu())
             
     results = flush_scalar_meters(val_meters)
@@ -203,13 +203,13 @@ def adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
                 top_correct = top_correct.t()
                 top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
                 corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
-                for k in range(5):
+                for k in range(1,5):
                     adv_correct_k = top_adv_corrects[:k].float().sum(0)
                     correct_k = corrects[:k].float().sum(0)
                     adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
                     acc_list = list(correct_k.cpu().detach().numpy())
-                    val_meters["top{}_adv_accuracy".format(k+1)].cache_list(adv_acc_list)
-                    val_meters["top{}_accuracy".format(k+1)].cache_list(acc_list)
+                    val_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
+                    val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
                 # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
             if (batch_idx % 10) == 0:
                 print(
@@ -296,7 +296,11 @@ if __name__ == "__main__":
         bilevel_optim = torch.optim.SGD(model.parameters(),lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         bilevel_scheduler = StepLR(bilevel_optim,args.learning_rate,args.epochs)
     scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
-        
+    # test code
+    # model = torch.load("../test/checkpoint/epoch_199.pth")
+    # results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,200)
+    # exit()
+
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
         if args.bilevel: # bilevel training
@@ -330,5 +334,5 @@ if __name__ == "__main__":
                     model,
                     os.path.join(checkpoint_dir,"epoch_{}.pth".format(epoch))
                 )
-
+    
     log.flush()
