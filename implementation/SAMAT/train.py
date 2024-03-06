@@ -18,13 +18,13 @@ from tensorboardX import SummaryWriter
 
 global writer
 
-def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
+def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta):
     corrects = 0
     for batch_idx,batch in enumerate(dataset.train):
         optimizer.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,args,x_natural,y,optimizer)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,args,x_natural,y,optimizer,beta=beta)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
         #loss.backward()
@@ -245,6 +245,7 @@ if __name__ == "__main__":
     parser.add_argument("--sgd", action='store_true', help="use sgd.")
     parser.add_argument("--adam",action='store_true',help="use adam")
     parser.add_argument("--sgdadam",action="store_true",help="use SGD & adam for adversarial training") ## TODO needs hyperparameter tuning for learning rates (SGD & ADAM)
+    parser.add_argument("--beta",default=1.0, type= float, help = "hyperparameter for trades loss -> ce + beta * adv , range = 0.1~5.0")
     args = parser.parse_args()
     defaults = {action.dest: action.default for action in parser._actions}
     initialize(args, seed=42)
@@ -307,23 +308,23 @@ if __name__ == "__main__":
             if epoch%2==0: # train
                 train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
             else: # adv train
-                adv_train(args,model,log,device,dataset,bilevel_optim,train_meters,epoch,bilevel_scheduler)
-            results = adv_val(model,log,dataset,val_meters,bilevel_optim,bilevel_scheduler,epoch)
+                adv_train(args,model,log,device,dataset,bilevel_optim,train_meters,epoch,bilevel_scheduler,beta=args.beta)
+            results = adv_val(model,log,dataset,val_meters,bilevel_optim,bilevel_scheduler,epoch, beta= args.beta)
             if results["top1_accuracy"] > best_val:
                 best_val = results["top1_accuracy"]
                 torch.save(model, os.path.join(log_prefix,"best_checkpoint", "best.pth"))
 
         elif args.sgdadam: #A2GN
             adv_adam_train(args,model,log,device,dataset,optimizer,optimizer_adam,train_meters,epoch,scheduler)
-            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
+            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             if results["top1_accuracy"] > best_val:
                     best_val = results["top1_accuracy"]
                     torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
 
         else: # SAMAT or TRADESAM - requires option
-            adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
+            adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
             #train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
-            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch)
+            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
             if results["top1_accuracy"] > best_val:
                 best_val = results["top1_accuracy"]
                 torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
