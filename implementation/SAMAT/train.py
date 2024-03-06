@@ -183,14 +183,14 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
     writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
     return results
 
-def adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
+def adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
     model.eval()
     #log.eval(len_dataset = len(dataset.test))
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
-            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,args,x_natural,y,optimizer)
+            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,args,x_natural,y,optimizer,beta=beta)
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
             with torch.no_grad():
