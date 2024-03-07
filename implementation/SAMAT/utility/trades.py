@@ -13,7 +13,7 @@ def squared_l2_norm(x):
 def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
-def AT_TRAIN_adamsgd(model,args,
+def AT_TRAIN_adamsgd(model,device,args,
                 x_natural,
                 y,
                 optimizer_adam,
@@ -29,7 +29,7 @@ def AT_TRAIN_adamsgd(model,args,
     batch_size = len(x_natural)
 
     # generate adversarial example
-    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
     if distance == 'l_inf':
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
@@ -45,7 +45,7 @@ def AT_TRAIN_adamsgd(model,args,
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
-        delta = 0.001 * torch.randn(x_natural.shape).cuda().detach()
+        delta = 0.001 * torch.randn(x_natural.shape).to(device).detach()
         delta = Variable(delta.data, requires_grad=True)
 
         # Setup optimizers
@@ -107,7 +107,7 @@ def AT_TRAIN_adamsgd(model,args,
     return loss, loss_natural, loss_robust,adv_pred,predictions
 
 
-def AT_TRAIN(model,args,
+def AT_TRAIN(model,device,args,
                 x_natural,
                 y,
                 optimizer,
@@ -133,7 +133,7 @@ def AT_TRAIN(model,args,
     # generate adversarial sample at local maxima
     model.eval()
 
-    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
     if distance == 'l_inf':
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
@@ -149,7 +149,7 @@ def AT_TRAIN(model,args,
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
-        delta = 0.001 * torch.randn(x_natural.shape).cuda().detach()
+        delta = 0.001 * torch.randn(x_natural.shape).to(device).detach()
         delta = Variable(delta.data, requires_grad=True)
 
         # Setup optimizers
@@ -207,7 +207,7 @@ def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
 
-def AT_VAL(model,args,
+def AT_VAL(model,device,args,
                 x_natural,
                 y,
                 optimizer,
@@ -221,7 +221,7 @@ def AT_VAL(model,args,
     model.eval()
     batch_size = len(x_natural)
     # generate adversarial example
-    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
     if distance == 'l_inf':
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
@@ -232,7 +232,7 @@ def AT_VAL(model,args,
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
-        delta = 0.001 * torch.randn(x_natural.shape).cuda().detach()
+        delta = 0.001 * torch.randn(x_natural.shape).to(device).detach()
         delta = Variable(delta.data, requires_grad=True)
 
         # Setup optimizers

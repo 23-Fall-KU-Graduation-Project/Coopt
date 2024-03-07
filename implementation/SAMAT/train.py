@@ -11,6 +11,7 @@ from utility.initialize import initialize
 from utility.step_lr import StepLR
 from utility.bypass_bn import enable_running_stats, disable_running_stats
 from utility.meters import get_meters,Meter,ScalarMeter,flush_scalar_meters
+from utility.ema import ExponentialMovingAverage
 import sys; sys.path.append("..")
 from sam import SAM
 from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm, AT_VAL, AT_TRAIN_adamsgd
@@ -24,7 +25,7 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
         optimizer.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,args,x_natural,y,optimizer,beta=beta)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
         #loss.backward()
@@ -69,7 +70,7 @@ def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,tr
         optimizer_adam.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN_adamsgd(model,args,x_natural,y,optimizer_sgd,optimizer_adam)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN_adamsgd(model,device,args,x_natural,y,optimizer_sgd,optimizer_adam)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
         #loss.backward()
@@ -183,14 +184,14 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
     writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
     return results
 
-def adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
+def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
     model.eval()
     #log.eval(len_dataset = len(dataset.test))
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
-            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,args,x_natural,y,optimizer,beta=beta)
+            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
             with torch.no_grad():
@@ -246,15 +247,22 @@ if __name__ == "__main__":
     parser.add_argument("--adam",action='store_true',help="use adam")
     parser.add_argument("--sgdadam",action="store_true",help="use SGD & adam for adversarial training") ## TODO needs hyperparameter tuning for learning rates (SGD & ADAM)
     parser.add_argument("--beta",default=1.0, type= float, help = "hyperparameter for trades loss -> ce + beta * adv , range = 0.1~5.0")
+    parser.add_argument("--ema",action="store_true",help="use exponential moving average")
+    parser.add_argument("--ema_decay",default=0.995,type=float,help = "decay factor for exponential moving average.")
+    parser.add_argument("--gpus",default="0",type=str, help = "gpu devices. eg)0")
     args = parser.parse_args()
     defaults = {action.dest: action.default for action in parser._actions}
     initialize(args, seed=42)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:"+args.gpus if torch.cuda.is_available() else "cpu")
 
     dataset = Cifar(args.batch_size, args.threads)
     log = Log(log_each=10)
     model = WideResNet(args.depth, args.width_factor, args.dropout, in_channels=3, labels=10).to(device)
-    
+    if args.ema:
+        ema_model = ExponentialMovingAverage(model,decay = args.decay)
+        ema_model.to(device)
+        ema_model.eval()
+        
     titles = []
     for arg in vars(args):
         value = getattr(args,arg)
@@ -296,25 +304,17 @@ if __name__ == "__main__":
     if args.bilevel: #bilevel
         bilevel_optim = torch.optim.SGD(model.parameters(),lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         bilevel_scheduler = StepLR(bilevel_optim,args.learning_rate,args.epochs)
-    scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
-    # test code
+    #scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,args.epochs)
+    # test code (validation)
     # model = torch.load("../test/checkpoint/epoch_199.pth")
     # results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,200)
     # exit()
 
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
-        if args.bilevel: # bilevel training
-            if epoch%2==0: # train
-                train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
-            else: # adv train
-                adv_train(args,model,log,device,dataset,bilevel_optim,train_meters,epoch,bilevel_scheduler,beta=args.beta)
-            results = adv_val(model,log,dataset,val_meters,bilevel_optim,bilevel_scheduler,epoch, beta= args.beta)
-            if results["top1_accuracy"] > best_val:
-                best_val = results["top1_accuracy"]
-                torch.save(model, os.path.join(log_prefix,"best_checkpoint", "best.pth"))
 
-        elif args.sgdadam: #A2GN
+        if args.sgdadam: #A2GN
             adv_adam_train(args,model,log,device,dataset,optimizer,optimizer_adam,train_meters,epoch,scheduler)
             results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             if results["top1_accuracy"] > best_val:
@@ -323,16 +323,19 @@ if __name__ == "__main__":
 
         else: # SAMAT or TRADESAM - requires option
             adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
-            #train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler)
-            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+            if args.ema:
+                ema_model.update_parameters(model)
+                results = adv_val(ema_model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+            else:
+                results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
             if results["top1_accuracy"] > best_val:
                 best_val = results["top1_accuracy"]
-                torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
+                torch.save(ema_model if args.ema else model, os.path.join(log_prefix,"checkpoint", "best.pth"))
         
         writer.add_scalar("val/best_val", best_val, epoch)
         if epoch ==0 or (epoch+1) % 10 == 0:
                 torch.save(
-                    model,
+                    ema_model if args.ema else model,
                     os.path.join(checkpoint_dir,"epoch_{}.pth".format(epoch))
                 )
     
