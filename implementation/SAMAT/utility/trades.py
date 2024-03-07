@@ -118,19 +118,21 @@ def AT_TRAIN(model,args,
                 distance='l_inf'):
     # define KL-loss
     criterion_kl = nn.KLDivLoss(size_average=False)
-    model.eval()
     batch_size = len(x_natural)
-    # label modification
-    # one_hot_label = torch.nn.functional.one_hot(y,num_classes=10)
-    # non_label = torch.logical_not(one_hot_label)
-    # modified_labels = one_hot_label.float()
-    # for i in range(batch_size):
-    #     non_target_indices = non_label[i].nonzero(as_tuple=True)[0]
-    #     random_indices = non_target_indices[torch.randperm(non_target_indices.size(0))[:2]]
-    #     modified_labels[i][random_indices] = -1
-    # modified_labels = (1/3) * modified_labels # scaling
 
-    # generate adversarial example
+    model.train()
+    # first step : climb to local maxima
+    optimizer.zero_grad()
+
+    predictions = model(x_natural) 
+    # first forward-backward step - SAMAT / SAMTRADES
+    natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
+    natural_loss.backward() #
+    optimizer.first_step(zero_grad=True) # climb to local maxima
+
+    # generate adversarial sample at local maxima
+    model.eval()
+
     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).cuda().detach()
     if distance == 'l_inf':
         for _ in range(perturb_steps):
@@ -180,25 +182,13 @@ def AT_TRAIN(model,args,
         x_adv = Variable(x_natural + delta, requires_grad=False)
     else:
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
-    model.train()
-
-    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False) # adv sample at origin
-    # zero gradient
-    optimizer.zero_grad()
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False) #projection
     # calculate robust loss
-    #logits = model(x_natural)
-    #loss_natural = F.cross_entropy(logits, y)
-    predictions = model(x_natural) 
-    # first forward-backward step - SAMAT / SAMTRADES
-    natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
-    #train_meters["CELoss"].cache((loss_sam.sum()/loss_sam.size(0)).cpu().detach().numpy())
-    natural_loss.backward() #+ adv loss 
-    optimizer.first_step(zero_grad=True) # climb to local maxima
     if args.trades: # 
         loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),F.softmax(model(x_natural), dim=1))
     else:
         loss_robust = smooth_crossentropy(model(x_adv),y).mean()
-        #loss_robust = F.cross_entropy(model(x_adv),y) # multilabel at
+
     # second forward-backward step
     loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
     loss = loss_sam + beta * loss_robust
