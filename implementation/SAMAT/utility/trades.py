@@ -182,38 +182,31 @@ def AT_TRAIN(model,args,
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     model.train()
 
-    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False)
+    x_adv = Variable(torch.clamp(x_adv, 0.0, 1.0), requires_grad=False) # adv sample at origin
     # zero gradient
     optimizer.zero_grad()
     # calculate robust loss
     #logits = model(x_natural)
     #loss_natural = F.cross_entropy(logits, y)
-    predictions = model(x_natural)
+    predictions = model(x_natural) 
     # first forward-backward step - SAMAT / SAMTRADES
     natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
     #train_meters["CELoss"].cache((loss_sam.sum()/loss_sam.size(0)).cpu().detach().numpy())
     natural_loss.backward() #+ adv loss 
-    optimizer.first_step(zero_grad=True)
-    if args.trades:
+    optimizer.first_step(zero_grad=True) # climb to local maxima
+    if args.trades: # 
         loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),F.softmax(model(x_natural), dim=1))
     else:
         loss_robust = smooth_crossentropy(model(x_adv),y).mean()
         #loss_robust = F.cross_entropy(model(x_adv),y) # multilabel at
     # second forward-backward step
-    loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing)
-    loss = loss_sam.mean() + beta * loss_robust
+    loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
+    loss = loss_sam + beta * loss_robust
     loss.backward()
     optimizer.second_step(zero_grad=True)
     with torch.no_grad():
         adv_pred = model(x_adv)
     return loss, natural_loss, loss_robust,adv_pred,predictions
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-import torch.optim as optim
-
 
 def squared_l2_norm(x):
     flattened = x.view(x.unsqueeze(0).shape[0], -1)
@@ -243,11 +236,7 @@ def AT_VAL(model,args,
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
             with torch.enable_grad():
-                if args.trades:
-                    loss_kl = criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                       F.softmax(model(x_natural), dim=1))
-                else:
-                    loss_kl = F.cross_entropy(model(x_adv),y) #for AT, x= adv, y = label
+                loss_kl = F.cross_entropy(model(x_adv),y) #for AT, x= adv, y = label
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -265,11 +254,7 @@ def AT_VAL(model,args,
             # optimize
             optimizer_delta.zero_grad()
             with torch.enable_grad():
-                if args.trades: # why -1?
-                    loss = (-1) * criterion_kl(F.log_softmax(model(adv), dim=1),
-                                            F.softmax(model(x_natural), dim=1))
-                else:
-                    loss = (-1) * F.cross_entropy(model(x_adv),y)
+                loss = (-1) * F.cross_entropy(model(x_adv),y)
             loss.backward()
             # renorming gradient
             grad_norms = delta.grad.view(batch_size, -1).norm(p=2, dim=1)
