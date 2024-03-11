@@ -11,10 +11,11 @@ from utility.initialize import initialize
 from utility.step_lr import StepLR
 from utility.bypass_bn import enable_running_stats, disable_running_stats
 from utility.meters import get_meters,Meter,ScalarMeter,flush_scalar_meters
-from utility.ema import ExponentialMovingAverage
+#from utility.ema import ExponentialMovingAverage
+from torch_ema import ExponentialMovingAverage
 import sys; sys.path.append("..")
 from sam import SAM
-from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm, AT_VAL, AT_TRAIN_adamsgd
+from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm, AT_VAL, AT_TRAIN_adamsam
 from tensorboardX import SummaryWriter
 
 global writer
@@ -48,8 +49,8 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
                 acc_list = list(correct_k.cpu().detach().numpy())
                 train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-            scheduler(epoch) # for default lr scheduler
-            # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
+            scheduler.step() # for default lr scheduler
+            # log(model, loss.cpu(), correct.cpu(),scheduler.get_last_lr)
         if (batch_idx % 10) == 0:
             print(
                 "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
@@ -61,16 +62,16 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("train" + "/" + k, v, epoch)
-    writer.add_scalar("train"+"/lr",scheduler.lr(),epoch)
+    writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
-def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,train_meters,epoch,scheduler):
+def adv_adam_train(args,model,log,device,dataset,optimizer_sam,optimizer_adam,train_meters,epoch,scheduler):
     corrects = 0
     for batch_idx,batch in enumerate(dataset.train):
-        optimizer_sgd.zero_grad()
+        optimizer_sam.zero_grad()
         optimizer_adam.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN_adamsgd(model,device,args,x_natural,y,optimizer_sgd,optimizer_adam)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN_adamsam(model,device,args,x_natural,y,optimizer_sam,optimizer_adam)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
         #loss.backward()
@@ -94,7 +95,7 @@ def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,tr
                 train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             #scheduler(epoch) # not using scheduler ..
-            # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
+            # log(model, loss.cpu(), correct.cpu(),scheduler.get_last_lr)
         if (batch_idx % 10) == 0:
             print(
                 "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
@@ -106,7 +107,7 @@ def adv_adam_train(args,model,log,device,dataset,optimizer_sgd,optimizer_adam,tr
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("train" + "/" + k, v, epoch)
-    writer.add_scalar("train"+"/lr",scheduler.lr(),epoch)
+    writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
 def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
     model.train()
@@ -146,14 +147,14 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
                 correct_k = corrects[:k].float().sum(0)
                 acc_list = list(correct_k.cpu().detach().numpy())
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-            log(model, loss.cpu(), correct.cpu(), scheduler.lr())
+            log(model, loss.cpu(), correct.cpu(), scheduler.get_last_lr())
             scheduler(epoch) # for default lr scheduler
             #scheduler.step() # for cosineif (batch_idx % 10) == 0:
     results = flush_scalar_meters(train_meters)
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("train" + "/" + k, v, epoch)
-    writer.add_scalar("train"+"/lr",scheduler.lr(),epoch)
+    writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
 def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
          # Single level optimization (SAM,ADAM,SGD)
@@ -181,17 +182,23 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("val" + "/" + k, v, epoch)
-    writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
+    writer.add_scalar("val"+"/lr",scheduler.get_last_lr(),epoch)
     return results
 
 def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
+    if args.ema:
+        ema,model = model[0],model[1]
     model.eval()
     #log.eval(len_dataset = len(dataset.test))
-
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
-            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
+            
+            if args.ema:
+                with ema.average_parameters():
+                    loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
+            else:
+                    loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
             with torch.no_grad():
@@ -211,7 +218,7 @@ def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
                     acc_list = list(correct_k.cpu().detach().numpy())
                     val_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
                     val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-                # log(model, loss.cpu(), correct.cpu(),scheduler.lr)
+                # log(model, loss.cpu(), correct.cpu(),scheduler.get_last_lr)
             if (batch_idx % 10) == 0:
                 print(
                     "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
@@ -223,7 +230,7 @@ def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("adv_val" + "/" + k, v, epoch)
-    writer.add_scalar("val"+"/lr",scheduler.lr(),epoch)
+    writer.add_scalar("val"+"/lr",scheduler.get_last_lr(),epoch)
     return results
 
 if __name__ == "__main__":
@@ -245,7 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--trades",action="store_true",help="use trades")
     parser.add_argument("--sgd", action='store_true', help="use sgd.")
     parser.add_argument("--adam",action='store_true',help="use adam")
-    parser.add_argument("--sgdadam",action="store_true",help="use SGD & adam for adversarial training") ## TODO needs hyperparameter tuning for learning rates (SGD & ADAM)
+    parser.add_argument("--adamsam",action="store_true",help="use SAM & adam for adversarial training") ## TODO needs hyperparameter tuning for learning rates (SGD & ADAM)
     parser.add_argument("--beta",default=1.0, type= float, help = "hyperparameter for trades loss -> ce + beta * adv , range = 0.1~5.0")
     parser.add_argument("--ema",action="store_true",help="use exponential moving average")
     parser.add_argument("--ema_decay",default=0.995,type=float,help = "decay factor for exponential moving average.")
@@ -259,9 +266,9 @@ if __name__ == "__main__":
     log = Log(log_each=10)
     model = WideResNet(args.depth, args.width_factor, args.dropout, in_channels=3, labels=10).to(device)
     if args.ema:
-        ema_model = ExponentialMovingAverage(model,decay = args.decay)
-        ema_model.to(device)
-        ema_model.eval()
+        ema_model = ExponentialMovingAverage([p for p in model.parameters() if p.requires_grad],decay = args.ema_decay)
+        # ema_model.to(device)
+        # ema_model.eval()
         
     titles = []
     for arg in vars(args):
@@ -293,10 +300,10 @@ if __name__ == "__main__":
     elif args.adam: # ADAM
         optimizer = torch.optim.Adam(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay)
         print("using adam")
-    elif args.sgdadam: # A2GN
-        optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay,momentum=args.momentum)
+    elif args.adamsam: # A2GN
+        optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho, adaptive=args.adaptive, lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer_adam = torch.optim.Adam(model.parameters(),lr=0.01)
-        print("using SGD & ADAM")
+        print("using SAM & ADAM")
     else: # SAM
         optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho, adaptive=args.adaptive, lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
         print("using SAM")
@@ -307,35 +314,40 @@ if __name__ == "__main__":
     #scheduler = StepLR(optimizer, args.learning_rate, args.epochs)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,args.epochs)
     # test code (validation)
-    # model = torch.load("../test/checkpoint/epoch_199.pth")
-    # results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,200)
+    # model = torch.load("../test/checkpoint/epoch_139.pth")
+    # results = adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,200,1)
     # exit()
 
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        if args.sgdadam: #A2GN
+        if args.adamsam: #A2GN
             adv_adam_train(args,model,log,device,dataset,optimizer,optimizer_adam,train_meters,epoch,scheduler)
-            results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
+            if args.ema:
+                ema_model.update()
+                ema = [ema_model,model]
+                results = adv_val(ema,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
+            else:
+                results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             if results["top1_accuracy"] > best_val:
                     best_val = results["top1_accuracy"]
-                    torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
+                    torch.save(ema_model.state_dict() if args.ema else model, os.path.join(log_prefix,"checkpoint", "best.pth"))
 
         else: # SAMAT or TRADESAM - requires option
             adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
             if args.ema:
                 ema_model.update_parameters(model)
-                results = adv_val(ema_model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+                results = adv_val(ema_model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
             else:
-                results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+                results = adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
             if results["top1_accuracy"] > best_val:
                 best_val = results["top1_accuracy"]
-                torch.save(ema_model if args.ema else model, os.path.join(log_prefix,"checkpoint", "best.pth"))
+                torch.save(ema_model.state_dict() if args.ema else model, os.path.join(log_prefix,"checkpoint", "best.pth"))
         
         writer.add_scalar("val/best_val", best_val, epoch)
         if epoch ==0 or (epoch+1) % 10 == 0:
                 torch.save(
-                    ema_model if args.ema else model,
+                    ema_model.state_dict() if args.ema else model,
                     os.path.join(checkpoint_dir,"epoch_{}.pth".format(epoch))
                 )
     
