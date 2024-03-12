@@ -193,7 +193,7 @@ def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
-            
+
             if args.ema:
                 with ema.average_parameters():
                     loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
@@ -326,7 +326,7 @@ if __name__ == "__main__":
             if args.ema:
                 ema_model.update()
                 ema = [ema_model,model]
-                results = adv_val(ema,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
+                results = adv_val(ema,device,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             else:
                 results = adv_val(model,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             if results["top1_accuracy"] > best_val:
@@ -336,8 +336,9 @@ if __name__ == "__main__":
         else: # SAMAT or TRADESAM - requires option
             adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
             if args.ema:
-                ema_model.update_parameters(model)
-                results = adv_val(ema_model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+                ema_model.update()
+                ema = [ema_model,model]
+                results = adv_val(ema,device,log,dataset,val_meters,optimizer,scheduler,epoch, beta = args.beta)
             else:
                 results = adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
             if results["top1_accuracy"] > best_val:
