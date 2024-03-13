@@ -49,7 +49,7 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
                 acc_list = list(correct_k.cpu().detach().numpy())
                 train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-            scheduler.step() # for default lr scheduler
+            #scheduler.step() # for default lr scheduler
             # log(model, loss.cpu(), correct.cpu(),scheduler.get_last_lr)
         if (batch_idx % 10) == 0:
             print(
@@ -335,6 +335,7 @@ if __name__ == "__main__":
 
         else: # SAMAT or TRADESAM - requires option
             adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
+            scheduler.step()
             if args.ema:
                 ema_model.update()
                 ema = [ema_model,model]
