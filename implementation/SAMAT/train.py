@@ -26,7 +26,7 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
         optimizer.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta, step_size=args.step_size,epsilon=args.eps,perturb_steps=args.perturb_steps)
+        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta, step_size=args.step_size,epsilon=args.eps,perturb_steps=args.perturb_step)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
 
