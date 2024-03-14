@@ -184,20 +184,33 @@ def AT_TRAIN(model,device,args,
 
     predictions = model(x_natural) 
     # first forward-backward step - SAMAT / SAMTRADES
-    natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
-    natural_loss.backward() 
-    optimizer.first_step(zero_grad=True) # climb to local maxima
-    # calculate robust loss
-    if args.trades: # 
-        loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),F.softmax(model(x_natural), dim=1))
-    else:
-        loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+    if args.sgd: # TRADES or AT (traditional AT)
+        natural_loss = smooth_crossentropy(predictions,y,smoothing=args.label_smoothing).mean()
+        if args.trades: #TRADES
+            loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv),dim=1),F.softmax(model(x_natural),dim=1))
+            loss = natural_loss + beta * loss_robust
+            loss.backward()
+            optimizer.step()
+        else: # AT
+            loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+            loss_robust.backward()
+            optimizer.step()
+    
+    else: # Ours
+        natural_loss = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
+        natural_loss.backward() 
+        optimizer.first_step(zero_grad=True) # climb to local maxima
+        # calculate robust loss
+        if args.trades: # 
+            loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),F.softmax(model(x_natural), dim=1))
+        else:
+            loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+        # second forward-backward step
+        loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
+        loss = loss_sam + beta * loss_robust
+        loss.backward()
+        optimizer.second_step(zero_grad=True)
 
-    # second forward-backward step
-    loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
-    loss = loss_sam + beta * loss_robust
-    loss.backward()
-    optimizer.second_step(zero_grad=True)
     with torch.no_grad():
         adv_pred = model(x_adv)
     return loss, natural_loss, loss_robust,adv_pred,predictions
