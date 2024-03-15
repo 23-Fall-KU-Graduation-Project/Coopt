@@ -139,19 +139,14 @@ def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
     return results
 
 def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
-    if args.ema:
-        ema,model = model[0],model[1]
     model.eval()
     #log.eval(len_dataset = len(dataset.test))
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
 
-            if args.ema:
-                with ema.average_parameters():
-                    loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
-            else:
-                    loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
+            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
+          
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
             with torch.no_grad():
