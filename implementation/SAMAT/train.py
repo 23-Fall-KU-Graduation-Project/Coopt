@@ -1,6 +1,6 @@
-import argparse
+from argparse import ArgumentParser
 import os
-import time 
+from time import time, localtime, strftime
 
 from tensorboardX import SummaryWriter
 import torch
@@ -11,7 +11,6 @@ from utility.trades import AT_TRAIN, AT_VAL
 from model.wide_res_net import WideResNet
 from model.smooth_cross_entropy import smooth_crossentropy
 from data.cifar import Cifar
-from utility.log import Log
 from utility.initialize import initialize
 from utility.bypass_bn import enable_running_stats, disable_running_stats
 from utility.meters import get_meters,ScalarMeter,flush_scalar_meters
@@ -25,20 +24,20 @@ def adv_train(args,
               optimizer,
               train_meters,
               epoch,
-              scheduler,
-              beta
+              scheduler
               ) -> None:
     corrects = 0
     for batch_idx,batch in enumerate(dataset.train):
-        optimizer.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        _, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta, step_size=args.step_size,epsilon=args.eps,perturb_steps=args.perturb_step)
+        at_train_result = AT_TRAIN(model, device, args, x_natural, y,
+                                   optimizer, args.step_size, args.eps, args.perturb_step, args.beta)
+        _, loss_natural, loss_robust, adv_pred, pred = at_train_result
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
 
         with torch.no_grad():
-            #acc calculation
+            # Calculate accuracy
             adv_correct = torch.argmax(adv_pred.data,1) == y
             correct = torch.argmax(pred.data, 1) == y
             _, top_adv_correct = adv_pred.topk(5)
@@ -69,7 +68,15 @@ def adv_train(args,
     writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
 
-def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
+def train(args, 
+          model, 
+          log, 
+          device, 
+          dataset, 
+          optimizer, 
+          train_meters, 
+          epoch,
+          scheduler):
     model.train()
     log.train(len_dataset=len(dataset.train))
 
@@ -109,16 +116,22 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
             log(model, loss.cpu(), correct.cpu(), scheduler.get_last_lr())
             scheduler(epoch) # for default lr scheduler
-            #scheduler.step() # for cosineif (batch_idx % 10) == 0:
     results = flush_scalar_meters(train_meters)
     for k, v in results.items():
         if k != "best_val":
             writer.add_scalar("train" + "/" + k, v, epoch)
     writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
-def adv_val(model,device,dataset,val_meters,optimizer,scheduler,epoch,beta):
+def adv_val(model,
+            device,
+            args,
+            dataset,
+            val_meters,
+            optimizer,
+            scheduler,
+            epoch,
+            beta):
     model.eval()
-    #log.eval(len_dataset = len(dataset.test))
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
@@ -159,8 +172,8 @@ def adv_val(model,device,dataset,val_meters,optimizer,scheduler,epoch,beta):
     writer.add_scalar("val"+"/lr",scheduler.get_last_lr(),epoch)
     return results
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def get_arguments():
+    parser = ArgumentParser()
     parser.add_argument("--adaptive", default=True, type=bool, help="True if you want to use the Adaptive SAM.")
     parser.add_argument("--batch_size", default=128, type=int, help="Batch size used in the training and validation loop.")
     parser.add_argument("--depth", default=16, type=int, help="Number of layers.")
@@ -180,17 +193,13 @@ if __name__ == "__main__":
     parser.add_argument("--step_size",default=2./255.,type = float, help = "PGD step size")
     parser.add_argument("--eps",default=8./255.,type=float,help="PGD epsilon")
     parser.add_argument("--perturb_step",default=10,type=int,help="PGD iteration step")
+
     args = parser.parse_args()
-    defaults = {action.dest: action.default for action in parser._actions}
-    initialize(args, seed=42)
-    device = torch.device("cuda:"+args.gpus if torch.cuda.is_available() else "cpu")
+    return parser, args
 
-    dataset = Cifar(args.batch_size, args.threads)
-    log = Log(log_each=10)
-    model = WideResNet(args.depth, args.width_factor, args.dropout, in_channels=3, labels=10).to(device)
-
-
+def get_argument_title(parser, args) -> str:
     titles = []
+    defaults = {action.dest: action.default for action in parser._actions}
     for arg in vars(args):
         value = getattr(args,arg)
         default = defaults[arg]
@@ -199,44 +208,69 @@ if __name__ == "__main__":
         elif value is True:
             titles.append(f"{arg}={value}")
     title = ",".join(titles)
+    return title
 
-    start_time = time.time()
-    local_start_time_str = time.strftime(
-        "%Y-%m-%d_%H:%M:%S", time.localtime(start_time)
-    )
-    log_prefix = "../test"
-    log_dir = os.path.join(log_prefix,"runs", title + "-" + local_start_time_str.replace(":","-"))
-    writer = SummaryWriter(log_dir = log_dir) # directory for tensorboard logs
-    checkpoint_dir = os.path.join(log_prefix,"checkpoint") # directory for model checkpoints
+def main():
+    parser, args = get_arguments()
+    title = get_argument_title(parser)
+    initialize(seed=42)
 
-    train_meters = get_meters("train",model)
-    val_meters = get_meters("val",model)
+    # Device
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{args.gpus}")
+    else:
+        print("Warning: torch.cuda.is_available is not True")
+    
+    # Path
+    dir_prefix = os.path.join("..", "test")
+    start_time = localtime(time())
+    start_time_str = strftime("%Y-%m-%d_%H-%M-%S", start_time)
+    log_dir = os.path.join(dir_prefix,"runs", title + "-" + start_time_str)
+    checkpoint_dir = os.path.join(dir_prefix, "checkpoint")
+
+    writer = SummaryWriter(log_dir=log_dir)
+    dataset = Cifar(args.batch_size, args.threads)
+    model = WideResNet(args.depth,
+                       args.width_factor,
+                       args.dropout,
+                       in_channels=3,
+                       labels=10).to(device)
+
+    train_meters = get_meters("train", model)
+    val_meters = get_meters("val", model)
     val_meters["best_val"] = ScalarMeter("best_val")
-    best_val = 0.0
-    base_optimizer = torch.optim.SGD
-    if args.sgd: # use sgd
-        optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay,momentum=args.momentum)
-        print("using sgd")
-    else: # SAMAT
-        optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho, adaptive=args.adaptive, lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
-        print("using SAM")
+    if args.sgd:
+        used_optimizer = "SGD"
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate,
+                                    weight_decay=args.weight_decay, momentum=args.momentum)
+    else:
+        # SAMAT
+        used_optimizer = "SAM"
+        base_optimizer = torch.optim.SGD
+        optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho,
+                        adaptive=args.adaptive, lr=args.learning_rate,
+                        momentum=args.momentum, weight_decay=args.weight_decay)
+    print(f"using {used_optimizer}")
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,args.epochs)
 
+    best_val = 0.0
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        adv_train(args,model,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
+        # Train
+        adv_train(args, model, device, dataset, optimizer, train_meters, epoch, scheduler)
         scheduler.step()
-        results = adv_val(model,device,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+        results = adv_val(model, device, args, dataset, val_meters, optimizer, scheduler, epoch)
+
+        # Best checkpoint
         if results["top1_accuracy"] > best_val:
             best_val = results["top1_accuracy"]
-            torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
+            torch.save(model, os.path.join(checkpoint_dir, "best.pth"))
         
+        # Interval checkpoint
         writer.add_scalar("val/best_val", best_val, epoch)
-        if epoch ==0 or (epoch+1) % 10 == 0:
-                torch.save(
-                    model,
-                    os.path.join(checkpoint_dir,"epoch_{}.pth".format(epoch))
-                )
-    
-    log.flush()
+        if (epoch == 0) or (epoch + 1 % 10 == 0):
+            torch.save(model, os.path.join(checkpoint_dir, f"epoch_{epoch}.pth"))
+
+if __name__ == "__main__":
+    main()

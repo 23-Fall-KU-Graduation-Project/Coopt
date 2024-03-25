@@ -9,7 +9,6 @@ def squared_l2_norm(x):
     flattened = x.view(x.unsqueeze(0).shape[0], -1)
     return (flattened ** 2).sum(1)
 
-
 def l2_norm(x):
     return squared_l2_norm(x).sqrt()
 
@@ -24,7 +23,7 @@ def AT_TRAIN_adamsam(model,device,args,
                 beta=1.0,
                 distance='l_inf'):
     # define KL-loss
-    criterion_kl = nn.KLDivLoss(size_average=False)
+    criterion_kl = nn.KLDivLoss(reduction='sum')
     model.eval()
     batch_size = len(x_natural)
 
@@ -111,20 +110,21 @@ def AT_TRAIN_adamsam(model,device,args,
     return loss, loss_natural, loss_robust,adv_pred,predictions
 
 
-def AT_TRAIN(model,device,args,
-                x_natural,
-                y,
-                optimizer,
-                step_size=0.003,
-                epsilon=0.031,
-                perturb_steps=10,
-                beta=1.0,
-                distance='l_inf'):
-    # define KL-loss
-    criterion_kl = nn.KLDivLoss(size_average=False)
+def AT_TRAIN(model,
+             device,args,
+             x_natural,
+             y,
+             optimizer,
+             step_size=0.003,
+             epsilon=0.031,
+             perturb_steps=10,
+             beta=1.0,
+             distance='l_inf'):
+    # Define KL-loss
+    criterion_kl = nn.KLDivLoss(reduction='sum')
     batch_size = len(x_natural)
 
-    # generate adversarial sample 
+    # Generate adversarial sample 
     model.eval()
 
     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
@@ -137,7 +137,6 @@ def AT_TRAIN(model,device,args,
                                        F.softmax(model(x_natural), dim=1))
                 else:
                     loss_kl = smooth_crossentropy(model(x_adv),y).mean()
-                    #loss_kl = F.cross_entropy(model(x_adv),y) #for AT, x= adv, y = label
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -152,7 +151,7 @@ def AT_TRAIN(model,device,args,
         for _ in range(perturb_steps):
             adv = x_natural + delta
 
-            # optimize
+            # Optimize
             optimizer_delta.zero_grad()
             with torch.enable_grad():
                 if args.trades: # why -1?
@@ -214,7 +213,7 @@ def AT_TRAIN(model,device,args,
 
     with torch.no_grad():
         adv_pred = model(x_adv)
-    return loss, natural_loss, loss_robust,adv_pred,predictions
+    return loss, natural_loss, loss_robust, adv_pred, predictions
 
 def squared_l2_norm(x):
     flattened = x.view(x.unsqueeze(0).shape[0], -1)
@@ -235,7 +234,7 @@ def AT_VAL(model,device,args,
                 beta=1.0,
                 distance='l_inf'):
     # define KL-loss
-    criterion_kl = nn.KLDivLoss(size_average=False)
+    criterion_kl = nn.KLDivLoss(reduction='sum')
     model.eval()
     batch_size = len(x_natural)
     # generate adversarial example
