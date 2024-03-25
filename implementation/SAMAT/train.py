@@ -14,109 +14,6 @@ from utility.initialize import initialize
 from utility.bypass_bn import enable_running_stats
 from utility.meters import get_meters,ScalarMeter,flush_scalar_meters
 
-global writer
-
-def adv_train(args,
-              model,
-              device,
-              dataset,
-              optimizer,
-              train_meters,
-              epoch,
-              scheduler
-              ) -> None:
-    corrects = 0
-    for batch_idx,batch in enumerate(dataset.train):
-        enable_running_stats(model)
-        x_natural, y = (b.to(device) for b in batch)
-        at_train_result = AT_TRAIN(model, device, args, x_natural, y,
-                                   optimizer, args.step_size, args.eps, args.perturb_step, args.beta)
-        _, loss_natural, loss_robust, adv_pred, pred = at_train_result
-        train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
-        train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
-
-        with torch.no_grad():
-            # Calculate accuracy
-            adv_correct = torch.argmax(adv_pred.data,1) == y
-            correct = torch.argmax(pred.data, 1) == y
-            _, top_adv_correct = adv_pred.topk(5)
-            _, top_correct = pred.topk(5)
-            top_adv_correct = top_adv_correct.t()
-            top_correct = top_correct.t()
-            top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
-            corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
-            for k in range(1,5):
-                adv_correct_k = top_adv_corrects[:k].float().sum(0)
-                correct_k = corrects[:k].float().sum(0)
-                adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
-                acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
-                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-    
-        if batch_idx % 10 == 0:
-            print(
-                "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
-                        epoch, batch_idx, len(dataset.train), loss_natural.item(),loss_robust.item(),adv_correct.float().mean().item(),
-                        correct.float().mean().item()
-                    )
-            )
-    results = flush_scalar_meters(train_meters)
-    for k, v in results.items():
-        if k != "best_val":
-            writer.add_scalar("train" + "/" + k, v, epoch)
-    writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
-
-
-def adv_val(model,
-            device,
-            args,
-            dataset,
-            val_meters,
-            optimizer,
-            scheduler,
-            epoch,
-            beta):
-    model.eval()
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(dataset.test):
-            x_natural,y = (b.to(device) for b in batch)
-
-            _, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
-          
-            val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
-            val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
-            with torch.no_grad():
-                #acc calculation
-                adv_correct = torch.argmax(adv_pred.data,1) == y
-                correct = torch.argmax(pred.data, 1) == y
-                _, top_adv_correct = adv_pred.topk(5)
-                _, top_correct = pred.topk(5)
-                top_adv_correct = top_adv_correct.t()
-                top_correct = top_correct.t()
-                top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
-                corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
-                for k in range(1,5):
-                    adv_correct_k = top_adv_corrects[:k].float().sum(0)
-                    correct_k = corrects[:k].float().sum(0)
-                    adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
-                    acc_list = list(correct_k.cpu().detach().numpy())
-                    val_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
-                    val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-                # log(model, loss.cpu(), correct.cpu(),scheduler.get_last_lr)
-            if (batch_idx % 10) == 0:
-                print(
-                    "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
-                            epoch, batch_idx, len(dataset.test), loss_natural.item(),loss_robust.item(),correct.float().mean().item(),
-                            adv_correct.float().mean().item()
-                        )
-                )
-    results = flush_scalar_meters(val_meters)
-    for k, v in results.items():
-        if k != "best_val":
-            writer.add_scalar("adv_val" + "/" + k, v, epoch)
-    writer.add_scalar("val"+"/lr",scheduler.get_last_lr(),epoch)
-    return results
-
 def get_arguments():
     parser = ArgumentParser()
     parser.add_argument("--adaptive", default=True, type=bool, help="True if you want to use the Adaptive SAM.")
@@ -154,10 +51,97 @@ def get_argument_title(parser, args) -> str:
             titles.append(f"{arg}={value}")
     title = ",".join(titles)
     return title
+def calculate_accuracy(meters, y, adv_pred, pred):
+    with torch.no_grad():
+        adv_correct = torch.argmax(adv_pred.data,1) == y
+        correct = torch.argmax(pred.data, 1) == y
+        _, top_adv_correct = adv_pred.topk(5)
+        _, top_correct = pred.topk(5)
+        top_adv_correct = top_adv_correct.t()
+        top_correct = top_correct.t()
+        top_adv_corrects = top_adv_correct.eq(y.view(1,-1).expand_as(top_adv_correct))
+        corrects = top_correct.eq(y.view(1,-1).expand_as(top_correct))
+
+        for k in range(1,5):
+            adv_correct_k = top_adv_corrects[:k].float().sum(0)
+            correct_k = corrects[:k].float().sum(0)
+            adv_acc_list = list(adv_correct_k.cpu().detach().numpy())
+            acc_list = list(correct_k.cpu().detach().numpy())
+            meters[f"top{k}_adv_accuracy"].cache_list(adv_acc_list)
+            meters[f"top{k}_accuracy"].cache_list(acc_list)
+    return correct, adv_correct
+
+def print_progress(dataset, epoch, batch_idx, loss_natural, loss_robust, correct, adv_correct):
+    print(" \t ".join((f"Epoch: [{epoch}][{batch_idx}/{len(dataset.test)}]",
+                                  f"Loss {loss_natural.item():.3f}",
+                                  f"Adv_Loss {loss_robust.item():.3f}",
+                                  f"Acc {correct.float().mean().item():.3f}",
+                                  f"Adv_Acc {adv_correct.float().mean().item():.3f}")))
+
+def adv_train(args,
+              model,
+              device,
+              scheduler,
+              dataset,
+              optimizer,
+              train_meters,
+              epoch,
+              writer) -> None:
+    for batch_idx,batch in enumerate(dataset.train):
+        enable_running_stats(model)
+        x_natural, y = (b.to(device) for b in batch)
+        at_train_result = AT_TRAIN(model, device, args, x_natural, y,
+                                   optimizer, args.step_size, args.eps,
+                                   args.perturb_step, args.beta)
+        _, loss_natural, loss_robust, adv_pred, pred = at_train_result
+
+        train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
+        train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
+
+        if batch_idx % 10 == 0:
+            correct, adv_correct = calculate_accuracy(train_meters, y, adv_pred, pred)
+            print_progress(dataset, epoch, batch_idx, loss_natural, loss_robust, correct, adv_correct)
+
+    results = flush_scalar_meters(train_meters)
+    for k, v in results.items():
+        if k != "best_val":
+            writer.add_scalar(f"train/{k}", v, epoch)
+    writer.add_scalar("train/lr", scheduler.get_last_lr(), epoch)
+
+def adv_val(model,
+            device,
+            scheduler,
+            args,
+            dataset,
+            val_meters,
+            optimizer,
+            epoch,
+            writer):
+    model.eval()
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(dataset.test):
+            x_natural,y = (b.to(device) for b in batch)
+
+            at_val_result = AT_VAL(model, device, args, x_natural, y, optimizer, beta=args.beta)
+            _, loss_natural, loss_robust, adv_pred, pred = at_val_result
+          
+            val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
+            val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
+
+            if (batch_idx % 10) == 0:
+                correct, adv_correct = calculate_accuracy(val_meters, y, adv_pred, pred)
+                print_progress(dataset, epoch, batch_idx, loss_natural, loss_robust, correct, adv_correct)
+
+    results = flush_scalar_meters(val_meters)
+    for k, v in results.items():
+        if k != "best_val":
+            writer.add_scalar(f"adv_val/{k}", v, epoch)
+    writer.add_scalar("val/lr", scheduler.get_last_lr(), epoch)
+    return results
 
 def main():
     parser, args = get_arguments()
-    title = get_argument_title(parser)
+    title = get_argument_title(parser, args)
     initialize(seed=42)
 
     # Device
@@ -203,9 +187,9 @@ def main():
         val_meters["best_val"].cache(best_val)
 
         # Train
-        adv_train(args, model, device, dataset, optimizer, train_meters, epoch, scheduler)
+        adv_train(args, model, device, scheduler, dataset, optimizer, train_meters, epoch, writer)
         scheduler.step()
-        results = adv_val(model, device, args, dataset, val_meters, optimizer, scheduler, epoch)
+        results = adv_val(model, device, scheduler, args, dataset, val_meters, optimizer, epoch, writer)
 
         # Best checkpoint
         if results["top1_accuracy"] > best_val:
