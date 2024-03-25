@@ -1,7 +1,6 @@
 from utility.loading_bar import LoadingBar
 import time
 
-
 class Log:
     def __init__(self, log_each: int, initial_epoch=-1):
         self.loading_bar = LoadingBar(length=27)

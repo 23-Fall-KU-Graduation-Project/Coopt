@@ -1,4 +1,8 @@
 Pipfile
 Pipfile.lock
 
-implementation/test/*
+__pycache__/
+
+implementation/SAMAT/data
+implementation/SAMAT/cifar
+implementation/test

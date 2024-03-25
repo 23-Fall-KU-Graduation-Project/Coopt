@@ -1,22 +1,20 @@
 import argparse
-import torch
-import torch.nn as nn
 import os
 import time 
+
+from tensorboardX import SummaryWriter
+import torch
+
+import sys; sys.path.append("..")
+from sam import SAM
+from utility.trades import AT_TRAIN, AT_VAL
 from model.wide_res_net import WideResNet
 from model.smooth_cross_entropy import smooth_crossentropy
 from data.cifar import Cifar
 from utility.log import Log
 from utility.initialize import initialize
-from utility.step_lr import StepLR
 from utility.bypass_bn import enable_running_stats, disable_running_stats
-from utility.meters import get_meters,Meter,ScalarMeter,flush_scalar_meters
-#from utility.ema import ExponentialMovingAverage
-from torch_ema import ExponentialMovingAverage
-import sys; sys.path.append("..")
-from sam import SAM
-from utility.trades import AT_TRAIN, l2_norm,squared_l2_norm, AT_VAL, AT_TRAIN_adamsam
-from tensorboardX import SummaryWriter
+from utility.meters import get_meters,ScalarMeter,flush_scalar_meters
 
 global writer
 

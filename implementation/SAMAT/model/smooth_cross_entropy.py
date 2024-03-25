@@ -1,6 +1,5 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import functional as F
 
 
 def smooth_crossentropy(pred, gold, smoothing=0.1):

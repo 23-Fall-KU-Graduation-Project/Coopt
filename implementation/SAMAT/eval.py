@@ -1,19 +1,15 @@
 ## eval.py from autoattack library
-import os
 import argparse
+import os
 from pathlib import Path
-import warnings
 
 import torch
-import torch.nn as nn
 import torchvision.datasets as datasets
 import torch.utils.data as data
 import torchvision.transforms as transforms
 
 import sys
 sys.path.insert(0,'..')
-
-from model.wide_res_net import WideResNet
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -35,9 +31,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # load model
-    #model = WideResNet(depth=args.depth,width_factor=args.width_factor,dropout=args.dropout,in_channels=3,labels=10)
     model = torch.load(args.model)
-    #model.load_state_dict(ckpt)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()

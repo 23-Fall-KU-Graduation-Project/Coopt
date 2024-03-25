@@ -192,6 +192,7 @@ def AT_TRAIN(model,device,args,
             loss.backward()
             optimizer.step()
         else: # AT
+            loss = torch.tensor(0.)
             loss_robust = smooth_crossentropy(model(x_adv),y).mean()
             loss_robust.backward()
             optimizer.step()
