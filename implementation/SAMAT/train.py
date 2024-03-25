@@ -9,10 +9,9 @@ import sys; sys.path.append("..")
 from sam import SAM
 from utility.trades import AT_TRAIN, AT_VAL
 from model.wide_res_net import WideResNet
-from model.smooth_cross_entropy import smooth_crossentropy
 from data.cifar import Cifar
 from utility.initialize import initialize
-from utility.bypass_bn import enable_running_stats, disable_running_stats
+from utility.bypass_bn import enable_running_stats
 from utility.meters import get_meters,ScalarMeter,flush_scalar_meters
 
 global writer
@@ -67,60 +66,6 @@ def adv_train(args,
             writer.add_scalar("train" + "/" + k, v, epoch)
     writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
-
-def train(args, 
-          model, 
-          log, 
-          device, 
-          dataset, 
-          optimizer, 
-          train_meters, 
-          epoch,
-          scheduler):
-    model.train()
-    log.train(len_dataset=len(dataset.train))
-
-    for batch in dataset.train:
-        inputs, targets = (b.to(device) for b in batch)
-
-        if args.sgd or args.adam:
-            optimizer.zero_grad()
-            enable_running_stats(model)
-            predictions = model(inputs)
-            loss = torch.nn.functional.cross_entropy(predictions, targets,reduction="none")
-            train_meters["CELoss"].cache((loss.sum()/loss.size(0)).cpu().detach().numpy())
-            loss.mean().backward()
-            optimizer.step()
-        else: # SAM
-            # first forward-backward step
-            enable_running_stats(model)
-            predictions = model(inputs)
-            loss = smooth_crossentropy(predictions, targets, smoothing=args.label_smoothing)
-            train_meters["CELoss"].cache((loss.sum()/loss.size(0)).cpu().detach().numpy())
-            loss.mean().backward()
-            optimizer.first_step(zero_grad=True)
-
-            # second forward-backward step
-            disable_running_stats(model)
-            smooth_crossentropy(model(inputs), targets, smoothing=args.label_smoothing).mean().backward()
-            optimizer.second_step(zero_grad=True)
-
-        with torch.no_grad():
-            correct = torch.argmax(predictions.data, 1) == targets
-            _, top_correct = predictions.topk(5)
-            top_correct = top_correct.t()
-            corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
-            for k in range(1,5):
-                correct_k = corrects[:k].float().sum(0)
-                acc_list = list(correct_k.cpu().detach().numpy())
-                train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-            log(model, loss.cpu(), correct.cpu(), scheduler.get_last_lr())
-            scheduler(epoch) # for default lr scheduler
-    results = flush_scalar_meters(train_meters)
-    for k, v in results.items():
-        if k != "best_val":
-            writer.add_scalar("train" + "/" + k, v, epoch)
-    writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
 def adv_val(model,
             device,
