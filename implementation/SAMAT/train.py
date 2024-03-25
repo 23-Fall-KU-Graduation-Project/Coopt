@@ -18,13 +18,22 @@ from utility.meters import get_meters,ScalarMeter,flush_scalar_meters
 
 global writer
 
-def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta):
+def adv_train(args,
+              model,
+              device,
+              dataset,
+              optimizer,
+              train_meters,
+              epoch,
+              scheduler,
+              beta
+              ) -> None:
     corrects = 0
     for batch_idx,batch in enumerate(dataset.train):
         optimizer.zero_grad()
         enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
-        loss, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta, step_size=args.step_size,epsilon=args.eps,perturb_steps=args.perturb_step)
+        _, loss_natural,loss_robust,adv_pred,pred= AT_TRAIN(model,device,args,x_natural,y,optimizer,beta=beta, step_size=args.step_size,epsilon=args.eps,perturb_steps=args.perturb_step)
         train_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
         train_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
 
@@ -46,7 +55,7 @@ def adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,schedul
                 train_meters["top{}_adv_accuracy".format(k)].cache_list(adv_acc_list)
                 train_meters["top{}_accuracy".format(k)].cache_list(acc_list)
     
-        if (batch_idx % 10) == 0:
+        if batch_idx % 10 == 0:
             print(
                 "Epoch: [{}][{}/{}] \t Loss {:.3f}\t Adv_Loss {:.3f}\t Acc {:.3f}\t Adv_Acc {:.3f}\t".format(
                         epoch, batch_idx, len(dataset.train), loss_natural.item(),loss_robust.item(),adv_correct.float().mean().item(),
@@ -64,7 +73,7 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
     model.train()
     log.train(len_dataset=len(dataset.train))
 
-    for batch_idx, batch in enumerate(dataset.train):
+    for batch in dataset.train:
         inputs, targets = (b.to(device) for b in batch)
 
         if args.sgd or args.adam:
@@ -107,43 +116,14 @@ def train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler):
             writer.add_scalar("train" + "/" + k, v, epoch)
     writer.add_scalar("train"+"/lr",scheduler.get_last_lr(),epoch)
 
-def val(model,log,dataset,val_meters,optimizer,scheduler,epoch):
-         # Single level optimization (SAM,ADAM,SGD)
-    model.eval()
-    log.eval(len_dataset=len(dataset.test))
-
-    with torch.no_grad():
-        for batch_idx,batch in enumerate(dataset.test):
-            inputs, targets = (b.to(device) for b in batch)
-
-            predictions = model(inputs)
-            loss = smooth_crossentropy(predictions, targets)
-            val_meters["CELoss"].cache((loss.sum()/loss.size(0)).cpu().detach().numpy())
-            correct = torch.argmax(predictions.data, 1) == targets
-            _, top_correct = predictions.topk(5)
-            top_correct = top_correct.t()
-            corrects = top_correct.eq(targets.view(1,-1).expand_as(top_correct))
-            for k in range(1,5):
-                correct_k = corrects[:k].float().sum(0)
-                acc_list = list(correct_k.cpu().detach().numpy())
-                val_meters["top{}_accuracy".format(k)].cache_list(acc_list)
-            log(model, loss.cpu(), correct.cpu())
-            
-    results = flush_scalar_meters(val_meters)
-    for k, v in results.items():
-        if k != "best_val":
-            writer.add_scalar("val" + "/" + k, v, epoch)
-    writer.add_scalar("val"+"/lr",scheduler.get_last_lr(),epoch)
-    return results
-
-def adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta):
+def adv_val(model,device,dataset,val_meters,optimizer,scheduler,epoch,beta):
     model.eval()
     #log.eval(len_dataset = len(dataset.test))
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataset.test):
             x_natural,y = (b.to(device) for b in batch)
 
-            loss, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
+            _, loss_natural,loss_robust,adv_pred,pred= AT_VAL(model,device,args,x_natural,y,optimizer,beta=beta)
           
             val_meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
             val_meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
@@ -245,9 +225,9 @@ if __name__ == "__main__":
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        adv_train(args,model,log,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
+        adv_train(args,model,device,dataset,optimizer,train_meters,epoch,scheduler,beta=args.beta)
         scheduler.step()
-        results = adv_val(model,device,log,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
+        results = adv_val(model,device,dataset,val_meters,optimizer,scheduler,epoch,beta = args.beta)
         if results["top1_accuracy"] > best_val:
             best_val = results["top1_accuracy"]
             torch.save(model, os.path.join(log_prefix,"checkpoint", "best.pth"))
