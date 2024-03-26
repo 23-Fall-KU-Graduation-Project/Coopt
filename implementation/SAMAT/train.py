@@ -9,32 +9,36 @@ from torch.utils.data import DataLoader
 
 import sys; sys.path.append("..")
 from sam import SAM
-from utility.trades import AT_TRAIN, AT_VAL
+from utility import AT_TRAIN, AT_VAL
 from model.wide_res_net import WideResNet
 from data.cifar import Cifar
-from utility.initialize import initialize
-from utility.bypass_bn import enable_running_stats
-from utility.meters import Meter, ScalarMeter
-from utility.meters import get_meters, flush_scalar_meters
+from utility import initialize
+from utility import enable_running_stats
+from utility import Meter, ScalarMeter
+from utility import get_meters, flush_scalar_meters
+
+def assert_directory(dir: str):
+    if not os.path.exists(dir):
+        os.makedirs(dir)
 
 def get_arguments() -> tuple[ArgumentParser, Namespace]:
     parser = ArgumentParser()
-    parser.add_argument("--adaptive", default=True, type=bool, help="True if you want to use the Adaptive SAM.")
-    parser.add_argument("--batch_size", default=128, type=int, help="Batch size used in the training and validation loop.")
-    parser.add_argument("--depth", default=16, type=int, help="Number of layers.")
-    parser.add_argument("--dropout", default=0.0, type=float, help="Dropout rate.")
-    parser.add_argument("--epochs", default=200, type=int, help="Total number of epochs.")
-    parser.add_argument("--label_smoothing", default=0.1, type=float, help="Use 0.0 for no label smoothing.")
-    parser.add_argument("--learning_rate", default=0.1, type=float, help="Base learning rate at the start of the training.")
-    parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum.")
-    parser.add_argument("--threads", default=8, type=int, help="Number of CPU threads for dataloaders.")
-    parser.add_argument("--rho", default=2.0, type=int, help="Rho parameter for SAM.")
-    parser.add_argument("--weight_decay", default=0.0005, type=float, help="L2 weight decay.")
-    parser.add_argument("--width_factor", default=8, type=int, help="How many times wider compared to normal ResNet.")
-    parser.add_argument("--trades",action="store_true",help="use trades")
-    parser.add_argument("--sgd", action='store_true', help="use sgd.")
-    parser.add_argument("--beta",default=1.0, type= float, help = "hyperparameter for trades loss -> ce + beta * adv , range = 0.1~5.0")
-    parser.add_argument("--gpus",default="0",type=str, help = "gpu devices. eg)0")
+    parser.add_argument("--adaptive", default=True, type=bool, help="Use the adaptive SAM")
+    parser.add_argument("--batch_size", default=128, type=int, help="Batch size used in the training and validation loop")
+    parser.add_argument("--depth", default=16, type=int, help="Number of layers")
+    parser.add_argument("--dropout", default=0.0, type=float, help="Dropout rate")
+    parser.add_argument("--epochs", default=200, type=int, help="Total number of epochs")
+    parser.add_argument("--label_smoothing", default=0.1, type=float, help="Use 0.0 for no label smoothing")
+    parser.add_argument("--learning_rate", default=0.1, type=float, help="Base learning rate at the start of the training")
+    parser.add_argument("--momentum", default=0.9, type=float, help="SGD momentum")
+    parser.add_argument("--threads", default=8, type=int, help="Number of CPU threads for dataloaders")
+    parser.add_argument("--rho", default=2.0, type=int, help="Parameter for SAM")
+    parser.add_argument("--weight_decay", default=0.0005, type=float, help="L2 weight decay")
+    parser.add_argument("--width_factor", default=8, type=int, help="How many times wider compared to normal ResNet")
+    parser.add_argument("--trades",action="store_true",help="Use TRADES")
+    parser.add_argument("--sgd", action='store_true', help="Use SGD.")
+    parser.add_argument("--beta",default=1.0, type= float, help = "Hyperparameter for trades loss = CE + beta * adv. Range from 0.1 to 5.0")
+    parser.add_argument("--gpus",default="0",type=str, help = "Gpu devices. E.g. cpu, or 0 for cuda:0")
     parser.add_argument("--step_size",default=2./255.,type = float, help = "PGD step size")
     parser.add_argument("--eps",default=8./255.,type=float,help="PGD epsilon")
     parser.add_argument("--perturb_step",default=10,type=int,help="PGD iteration step")
@@ -141,21 +145,30 @@ def adv_learning(mode: str,
 
 def main():
     parser, args = get_arguments()
-    title = get_argument_title(parser, args)
     initialize(seed=42)
 
     # Device
-    if torch.cuda.is_available():
+    if args.gpus != "cpu":
         device = torch.device(f"cuda:{args.gpus}")
-    else:
-        print("Warning: torch.cuda.is_available is not True")
+        assert torch.cuda.is_available()
     
-    # Path
+    # Save logs
     dir_prefix = os.path.join("..", "test")
-    start_time = localtime(time())
-    start_time_str = strftime("%Y-%m-%d_%H-%M-%S", start_time)
-    log_dir = os.path.join(dir_prefix,"runs", title + "-" + start_time_str)
-    checkpoint_dir = os.path.join(dir_prefix, "checkpoint")
+    argument_title = get_argument_title(parser, args)
+    start_time = strftime("%Y-%m-%d_%H-%M-%S", localtime(time()))
+    title = argument_title + "-" + start_time
+    log_dir = os.path.join(dir_prefix, "runs", title)
+    checkpoint_dir = os.path.join(dir_prefix, "checkpoint", title)
+    command_line_dir = os.path.join(dir_prefix, "command_lines")
+
+    assert_directory(dir_prefix)
+    assert_directory(log_dir)
+    assert_directory(checkpoint_dir)
+    assert_directory(command_line_dir)
+
+    command_line_input = " ".join(sys.argv)
+    with open(os.path.join(command_line_dir, title + ".txt"), "w") as file:
+        file.write(command_line_input)
 
     writer = SummaryWriter(log_dir=log_dir)
     dataset = Cifar(args.batch_size, args.threads)
@@ -165,15 +178,17 @@ def main():
                        in_channels=3,
                        labels=10).to(device)
 
+    # Train
     train_meters = get_meters("train", model)
     val_meters = get_meters("val", model)
     val_meters["best_val"] = ScalarMeter("best_val")
     if args.sgd:
+        # AT / TRADES
         used_optimizer = "SGD"
         optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
                                     weight_decay=args.weight_decay, momentum=args.momentum)
     else:
-        # SAMAT
+        # SAMAT / SAMTRADES
         used_optimizer = "SAM"
         base_optimizer = optim.SGD
         optimizer = SAM(model.parameters(), base_optimizer, rho=args.rho,
@@ -186,17 +201,16 @@ def main():
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        # Train
         adv_learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
         scheduler.step()
         results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
 
-        # Best checkpoint
+        # Save best checkpoint
         if results["top1_accuracy"] > best_val:
             best_val = results["top1_accuracy"]
             torch.save(model, os.path.join(checkpoint_dir, "best.pth"))
         
-        # Interval checkpoint
+        # Save checkpoint periodically
         writer.add_scalar("val/best_val", best_val, epoch)
         if (epoch == 0) or (epoch + 1 % 10 == 0):
             torch.save(model, os.path.join(checkpoint_dir, f"epoch_{epoch}.pth"))
