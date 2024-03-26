@@ -4,7 +4,7 @@ import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 import torch.optim as optim
-from model.smooth_cross_entropy import smooth_crossentropy
+from utility import smooth_crossentropy
 
 def get_adversarial_examples(model: nn.Module,
                              device: torch.device,
@@ -17,7 +17,6 @@ def get_adversarial_examples(model: nn.Module,
                              y: Tensor,
                              batch_size: int):
     model.eval()
-    criterion_kl = nn.KLDivLoss(reduction='sum')
     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
 
     if distance == 'l_inf':
@@ -25,10 +24,11 @@ def get_adversarial_examples(model: nn.Module,
             x_adv.requires_grad_()
             with torch.enable_grad():
                 if is_trades:
-                    loss = criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                        F.softmax(model(x_natural), dim=1))
+                    loss = F.kl_div(F.log_softmax(model(x_adv), dim=1),
+                                    F.softmax(model(x_natural), dim=1),
+                                    reduction='sum')
                 else:
-                    loss = smooth_crossentropy(model(x_adv),y).mean()
+                    loss = smooth_crossentropy(model(x_adv),y)
             grad = torch.autograd.grad(loss, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -44,8 +44,9 @@ def get_adversarial_examples(model: nn.Module,
             optimizer_delta.zero_grad()
             with torch.enable_grad():
                 if is_trades: # why -1?
-                    loss = (-1) * criterion_kl(F.log_softmax(model(adv), dim=1),
-                                               F.softmax(model(x_natural), dim=1))
+                    loss = (-1) * F.kl_div(F.log_softmax(model(adv), dim=1),
+                                           F.softmax(model(x_natural), dim=1),
+                                           reduction='sum')
                 else:
                     loss = (-1) * F.cross_entropy(model(x_adv),y)
             loss.backward()
@@ -75,12 +76,9 @@ def AT_TRAIN(model: nn.Module,
              y: Tensor,
              optimizer: optim.Optimizer
              ) -> tuple[float, float, float, Tensor]:
-    criterion_kl = nn.KLDivLoss(reduction='sum')
-    batch_size = len(x_natural)
-
     x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
                                      args.perturb_step, args.step_size, args.eps,
-                                     x_natural, y, batch_size)
+                                     x_natural, y, batch_size=len(x_natural))
     x_adv.requires_grad = False
     
     model.train()
@@ -89,31 +87,34 @@ def AT_TRAIN(model: nn.Module,
     if args.sgd:
         if args.trades:
             # TRADES
-            loss_natural = smooth_crossentropy(predictions,y,smoothing=args.label_smoothing).mean()
-            loss_robust = args.beta * (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv),dim=1),F.softmax(model(x_natural),dim=1))
+            loss_natural = smooth_crossentropy(predictions,y,smoothing=args.label_smoothing)
+            loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv),dim=1),
+                                               F.softmax(model(x_natural),dim=1),
+                                               reduction='batchmean')
         else:
             # AT
             loss_natural = torch.tensor(0.)
-            loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+            loss_robust = smooth_crossentropy(model(x_adv),y)
         loss = loss_natural + loss_robust
         loss.backward()
         optimizer.step()
     else: # SAM
         # First forward-backward step to climb to local maxima
-        loss_natural = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing).mean()
+        loss_natural = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing)
         loss_natural.backward() 
         optimizer.first_step(zero_grad=True)
 
         if args.trades:
             # SAMTRADES
-            loss_robust = args.beta * (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                                                        F.softmax(model(x_natural), dim=1))
+            loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv), dim=1),
+                                               F.softmax(model(x_natural), dim=1),
+                                               reduction='batchmean')
         else:
             # SAMAT
-            loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+            loss_robust = smooth_crossentropy(model(x_adv),y)
 
         # Second forward-backward step
-        loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
+        loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing)
         loss = loss_sam + loss_robust
         loss.backward()
         optimizer.second_step(zero_grad=True)
@@ -126,21 +127,18 @@ def AT_VAL(model: nn.Module,
            x_natural: Tensor,
            y: Tensor
            ) -> tuple[float, float, float, Tensor]:
-    criterion_kl = nn.KLDivLoss(reduction='sum')
-    batch_size = len(x_natural)
-
-    # Generate adversarial example
     x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
                                      args.perturb_step, args.step_size, args.eps,
-                                     x_natural, y, batch_size)
+                                     x_natural, y, batch_size=len(x_natural))
     
     # calculate robust loss
     predictions = model(x_natural)
-    loss_natural = smooth_crossentropy(predictions, y).mean()
+    loss_natural = smooth_crossentropy(predictions, y)
     if args.trades:
-        loss_robust = args.beta * (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv), dim=1),
-                                                                    F.softmax(model(x_natural), dim=1))
+        loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv), dim=1),
+                                           F.softmax(model(x_natural), dim=1),
+                                           reduction='batchmean')
     else:
-        loss_robust = smooth_crossentropy(model(x_adv),y).mean()
+        loss_robust = smooth_crossentropy(model(x_adv),y)
     loss = loss_natural + loss_robust
     return loss.item(), loss_natural.item(), loss_robust.item(), x_adv
