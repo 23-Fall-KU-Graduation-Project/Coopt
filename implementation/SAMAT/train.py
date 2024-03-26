@@ -38,6 +38,7 @@ def get_arguments() -> tuple[ArgumentParser, Namespace]:
     parser.add_argument("--step_size",default=2./255.,type = float, help = "PGD step size")
     parser.add_argument("--eps",default=8./255.,type=float,help="PGD epsilon")
     parser.add_argument("--perturb_step",default=10,type=int,help="PGD iteration step")
+    parser.add_argument("--distance", default="l_inf", type=str, help="Distance norm to adversarial attack eg) l_2")
 
     args = parser.parse_args()
     return parser, args
@@ -88,8 +89,8 @@ def print_progress(batch_size: int,
                    accuracy: float,
                    adv_accuracy: float):
     print(" \t ".join((f"Epoch: [{epoch}][{batch_idx}/{batch_size}]",
-                                  f"Loss {loss_natural.item():.3f}",
-                                  f"Adv_Loss {loss_robust.item():.3f}",
+                                  f"Loss {loss_natural:.3f}",
+                                  f"Adv_Loss {loss_robust:.3f}",
                                   f"Acc {accuracy:.3f}",
                                   f"Adv_Acc {adv_accuracy:.3f}")))
 
@@ -107,24 +108,26 @@ def adv_learning(mode: str,
         model.eval()
         torch.set_grad_enabled(False)
     for batch_idx, batch in enumerate(data_loader):
-        if mode == "train":
-            enable_running_stats(model)
         x_natural, y = (b.to(device) for b in batch)
 
         if mode == "train":
+            enable_running_stats(model)
             at_result = AT_TRAIN(model, device, args, x_natural, y, optimizer)
         else:
             at_result = AT_VAL(model, device, args, x_natural, y)
-        _, loss_natural, loss_robust, adv_pred, pred = at_result
+        _, loss_natural, loss_robust, x_adv = at_result
 
-        meters["natural_loss"].cache((loss_natural).cpu().detach().numpy())
-        meters["robust_loss"].cache((loss_robust).cpu().detach().numpy())
+        meters["natural_loss"].cache(loss_natural)
+        meters["robust_loss"].cache(loss_robust)
 
         if (batch_idx % 10) == 0:
+            with torch.no_grad():
+                pred = model(x_natural)
+                adv_pred = model(x_adv)
             accuracy, adv_accuracy = calculate_acc_adv_acc(meters, y, adv_pred, pred)
-            print_progress(len(data_loader), epoch, batch_idx, loss_natural, loss_robust, accuracy, adv_accuracy)
-    if mode == "val":
-        torch.set_grad_enabled(True)
+            print_progress(len(data_loader), epoch, batch_idx,
+                           loss_natural, loss_robust, accuracy, adv_accuracy)
+    torch.set_grad_enabled(True)
 
     results = flush_scalar_meters(meters)
     for k, v in results.items():
@@ -134,6 +137,7 @@ def adv_learning(mode: str,
             else:
                 writer.add_scalar(f"adv_val/{k}", v, epoch)
     writer.add_scalar(f"{mode}/lr", scheduler.get_last_lr(), epoch)
+    return results
 
 def main():
     parser, args = get_arguments()
