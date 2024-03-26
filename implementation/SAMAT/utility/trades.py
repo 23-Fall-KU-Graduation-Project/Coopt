@@ -111,14 +111,14 @@ def AT_TRAIN_adamsam(model,device,args,
 
 
 def AT_TRAIN(model,
-             device,args,
+             device,
+             args,
              x_natural,
              y,
              optimizer,
              step_size=0.003,
              epsilon=0.031,
              perturb_steps=10,
-             beta=1.0,
              distance='l_inf'):
     # Define KL-loss
     criterion_kl = nn.KLDivLoss(reduction='sum')
@@ -129,7 +129,7 @@ def AT_TRAIN(model,
 
     x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
     if distance == 'l_inf':
-        for _ in range(perturb_steps):
+        for _ in range(args.perturb_steps):
             x_adv.requires_grad_()
             with torch.enable_grad():
                 if args.trades:
@@ -138,17 +138,17 @@ def AT_TRAIN(model,
                 else:
                     loss_kl = smooth_crossentropy(model(x_adv),y).mean()
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
-            x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
-            x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+            x_adv = x_adv.detach() + args.step_size * torch.sign(grad.detach())
+            x_adv = torch.min(torch.max(x_adv, x_natural - args.epsilon), x_natural + args.epsilon)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
     elif distance == 'l_2':
         delta = 0.001 * torch.randn(x_natural.shape).to(device).detach()
         delta = Variable(delta.data, requires_grad=True)
 
         # Setup optimizers
-        optimizer_delta = optim.SGD([delta], lr=epsilon / perturb_steps * 2)
+        optimizer_delta = optim.SGD([delta], lr=args.epsilon / args.perturb_steps * 2)
 
-        for _ in range(perturb_steps):
+        for _ in range(args.perturb_steps):
             adv = x_natural + delta
 
             # Optimize
@@ -171,7 +171,7 @@ def AT_TRAIN(model,
             # projection
             delta.data.add_(x_natural)
             delta.data.clamp_(0, 1).sub_(x_natural)
-            delta.data.renorm_(p=2, dim=0, maxnorm=epsilon)
+            delta.data.renorm_(p=2, dim=0, maxnorm=args.epsilon)
         x_adv = Variable(x_natural + delta, requires_grad=False)
     else:
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
@@ -187,7 +187,7 @@ def AT_TRAIN(model,
         natural_loss = smooth_crossentropy(predictions,y,smoothing=args.label_smoothing).mean()
         if args.trades: #TRADES
             loss_robust = (1.0 / batch_size) * criterion_kl(F.log_softmax(model(x_adv),dim=1),F.softmax(model(x_natural),dim=1))
-            loss = natural_loss + beta * loss_robust
+            loss = natural_loss + args.beta * loss_robust
             loss.backward()
             optimizer.step()
         else: # AT
@@ -207,7 +207,7 @@ def AT_TRAIN(model,
             loss_robust = smooth_crossentropy(model(x_adv),y).mean()
         # second forward-backward step
         loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing).mean()
-        loss = loss_sam + beta * loss_robust
+        loss = loss_sam + args.beta * loss_robust
         loss.backward()
         optimizer.second_step(zero_grad=True)
 
@@ -227,11 +227,9 @@ def l2_norm(x):
 def AT_VAL(model,device,args,
                 x_natural,
                 y,
-                optimizer,
                 step_size=0.003,
                 epsilon=0.031,
                 perturb_steps=10,
-                beta=1.0,
                 distance='l_inf'):
     # define KL-loss
     criterion_kl = nn.KLDivLoss(reduction='sum')
@@ -289,5 +287,5 @@ def AT_VAL(model,device,args,
         loss_robust = F.cross_entropy(model(x_adv),y)
     adv_pred = model(x_adv)
     pred = logits
-    loss = loss_natural + beta * loss_robust
+    loss = loss_natural + args.beta * loss_robust
     return loss, loss_natural, loss_robust,adv_pred,pred
