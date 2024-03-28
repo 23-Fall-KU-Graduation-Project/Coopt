@@ -1,1 +1,0 @@
-## directory for data code (imagenet,cifar,etc.)
