@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import os
 import time 
-from model.wide_res_net import WideResNet
+#from model.wide_res_net import WideResNet ## 
+from model.wideresnet import WideResNet
 from model.smooth_cross_entropy import smooth_crossentropy
 from data.cifar import Cifar
 from utility.log import Log

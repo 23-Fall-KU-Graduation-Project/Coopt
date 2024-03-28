@@ -243,7 +243,12 @@ def AT_VAL(model,device,args,
         for _ in range(perturb_steps):
             x_adv.requires_grad_()
             with torch.enable_grad():
-                loss_kl = F.cross_entropy(model(x_adv),y) #for AT, x= adv, y = label
+                if args.trades:
+                    loss_kl = criterion_kl(F.log_softmax(model(x_adv), dim=1),
+                                       F.softmax(model(x_natural), dim=1))
+                else:
+                    loss_kl = smooth_crossentropy(model(x_adv),y).mean()
+                    #loss_kl = F.cross_entropy(model(x_adv),y) #for AT, x= adv, y = label
             grad = torch.autograd.grad(loss_kl, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
