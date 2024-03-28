@@ -1,7 +1,7 @@
 Pipfile
 Pipfile.lock
 
-__pycache__/
+__pycache__
 
 implementation/SAMAT/data
 implementation/SAMAT/cifar
