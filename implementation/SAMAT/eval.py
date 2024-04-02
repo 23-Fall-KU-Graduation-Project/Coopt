@@ -16,7 +16,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str, default='./data')
     parser.add_argument('--norm', type=str, default='Linf')
     parser.add_argument('--epsilon', type=float, default=8./255.)
-    parser.add_argument('--model', type=str, default='../test/checkpoint/epoch_199.pth')
+    parser.add_argument('--model', type=str, default='../test/trades/epoch_199.pth')
     parser.add_argument("--depth", default=16, type=int, help="Number of layers.")
     parser.add_argument("--width_factor", default=8, type=int, help="How many times wider compared to normal ResNet.")
     parser.add_argument("--dropout", default=0.0, type=float, help="Dropout rate.")

@@ -127,7 +127,7 @@ def AT_VAL(model: nn.Module,
            x_natural: Tensor,
            y: Tensor
            ) -> tuple[float, float, float, Tensor]:
-    x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+    x_adv = get_adversarial_examples(model, device, False, args.distance,
                                      args.perturb_step, args.step_size, args.eps,
                                      x_natural, y, batch_size=len(x_natural))
     
