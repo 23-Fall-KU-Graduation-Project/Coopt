@@ -4,7 +4,6 @@ import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 import torch.optim as optim
-from utility import smooth_crossentropy
 
 def get_adversarial_examples(model: nn.Module,
                              device: torch.device,
@@ -28,7 +27,7 @@ def get_adversarial_examples(model: nn.Module,
                                     F.softmax(model(x_natural), dim=1),
                                     reduction='sum')
                 else:
-                    loss = smooth_crossentropy(model(x_adv),y)
+                    loss = F.cross_entropy(model(x_adv),y)
             grad = torch.autograd.grad(loss, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
@@ -87,20 +86,20 @@ def AT_TRAIN(model: nn.Module,
     if args.sgd:
         if args.trades:
             # TRADES
-            loss_natural = smooth_crossentropy(predictions,y,smoothing=args.label_smoothing)
+            loss_natural = F.cross_entropy(predictions,y,label_smoothing=args.label_smoothing)
             loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv),dim=1),
                                                F.softmax(model(x_natural),dim=1),
                                                reduction='batchmean')
         else:
             # AT
             loss_natural = torch.tensor(0.)
-            loss_robust = smooth_crossentropy(model(x_adv),y)
+            loss_robust = F.cross_entropy(model(x_adv),y)
         loss = loss_natural + loss_robust
         loss.backward()
         optimizer.step()
     else: # SAM
         # First forward-backward step to climb to local maxima
-        loss_natural = smooth_crossentropy(predictions, y, smoothing=args.label_smoothing)
+        loss_natural = F.cross_entropy(predictions, y, label_smoothing=args.label_smoothing)
         loss_natural.backward() 
         optimizer.first_step(zero_grad=True)
 
@@ -111,10 +110,10 @@ def AT_TRAIN(model: nn.Module,
                                                reduction='batchmean')
         else:
             # SAMAT
-            loss_robust = smooth_crossentropy(model(x_adv),y)
+            loss_robust = F.cross_entropy(model(x_adv),y)
 
         # Second forward-backward step
-        loss_sam = smooth_crossentropy(model(x_natural), y, smoothing=args.label_smoothing)
+        loss_sam = F.cross_entropy(model(x_natural), y, label_smoothing=args.label_smoothing)
         loss = loss_sam + loss_robust
         loss.backward()
         optimizer.second_step(zero_grad=True)
@@ -133,12 +132,12 @@ def AT_VAL(model: nn.Module,
     
     # calculate robust loss
     predictions = model(x_natural)
-    loss_natural = smooth_crossentropy(predictions, y)
+    loss_natural = F.cross_entropy(predictions, y)
     if args.trades:
         loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv), dim=1),
                                            F.softmax(model(x_natural), dim=1),
                                            reduction='batchmean')
     else:
-        loss_robust = smooth_crossentropy(model(x_adv),y)
+        loss_robust = F.cross_entropy(model(x_adv),y)
     loss = loss_natural + loss_robust
     return loss.item(), loss_natural.item(), loss_robust.item(), x_adv
