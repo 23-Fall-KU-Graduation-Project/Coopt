@@ -175,7 +175,7 @@ def main():
                        widen_factor=args.width_factor,
                        dropRate=args.dropout,
                        num_classes=10).to(device)
-    model = torch.load('../test/checkpoint/adaptive=True,trades=True-2024-03-28_14-50-24/best.pth')
+
     # Train
     train_meters = get_meters("train", model)
     val_meters = get_meters("val", model)
@@ -194,8 +194,7 @@ def main():
                         momentum=args.momentum, weight_decay=args.weight_decay)
     print(f"using {used_optimizer}")
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,args.epochs)
-    results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, 200, writer)
-    exit()
+
     best_val = 0.0
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
