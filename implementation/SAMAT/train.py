@@ -210,7 +210,7 @@ def main():
         
         # Save checkpoint periodically
         writer.add_scalar("val/best_val", best_val, epoch)
-        if (epoch == 0) or (epoch + 1 % 10 == 0):
+        if (epoch == 0) or ((epoch + 1) % 10 == 0):
             torch.save(model, os.path.join(checkpoint_dir, f"epoch_{epoch}.pth"))
 
 if __name__ == "__main__":
