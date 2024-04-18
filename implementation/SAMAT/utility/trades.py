@@ -28,11 +28,12 @@ def get_adversarial_examples(model: nn.Module,
                                     F.softmax(model(x_natural), dim=1),
                                     reduction='sum')
                 else:
-                    loss = smooth_crossentropy(model(x_adv),y)
+                    loss = smooth_crossentropy(model(x_adv),y,0)
             grad = torch.autograd.grad(loss, [x_adv])[0]
             x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
             x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
             x_adv = torch.clamp(x_adv, 0.0, 1.0)
+            
     elif distance == 'l_2':
         delta = 0.001 * torch.randn(x_natural.shape).to(device).detach()
         optimizer_delta = optim.SGD([delta], lr=epsilon / perturb_step * 2)
@@ -69,6 +70,7 @@ def get_adversarial_examples(model: nn.Module,
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     return x_adv
 
+
 def AT_TRAIN(model: nn.Module,
              device: torch.device,
              args: Namespace,
@@ -76,11 +78,12 @@ def AT_TRAIN(model: nn.Module,
              y: Tensor,
              optimizer: optim.Optimizer
              ) -> tuple[float, float, float, Tensor]:
-    x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
-                                     args.perturb_step, args.step_size, args.eps,
-                                     x_natural, y, batch_size=len(x_natural))
-    x_adv.requires_grad = False
-    
+    # ASAMT
+    # x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+    #                                 args.perturb_step, args.step_size, args.eps,
+    #                                 x_natural, y, batch_size=len(x_natural))
+    # x_adv.requires_grad = False
+        
     model.train()
     optimizer.zero_grad()
     predictions = model(x_natural) 
@@ -103,7 +106,12 @@ def AT_TRAIN(model: nn.Module,
         loss_natural = smooth_crossentropy(predictions, y)
         loss_natural.backward() 
         optimizer.first_step(zero_grad=True)
-
+        #SAMAT
+        x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+                                    args.perturb_step, args.step_size, args.eps,
+                                    x_natural, y, batch_size=len(x_natural))
+        x_adv.requires_grad = False
+        model.train()
         if args.trades:
             # SAMTRADES
             loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv), dim=1),
