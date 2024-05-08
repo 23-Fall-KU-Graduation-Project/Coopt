@@ -5,7 +5,7 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 import torch.optim as optim
 from utility.smooth_crossentropy import smooth_crossentropy
-
+from time import time
 def get_adversarial_examples(model: nn.Module,
                              device: torch.device,
                              is_trades: bool,
@@ -70,6 +70,61 @@ def get_adversarial_examples(model: nn.Module,
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     return x_adv
 
+def TRAIN(model: nn.Module,
+             device: torch.device,
+             args: Namespace,
+             x_natural: Tensor,
+             y: Tensor,
+             optimizer: optim.Optimizer
+             ) -> tuple[float, float, float, Tensor]:
+        
+    model.train()
+    optimizer.zero_grad()
+    if args.sgd: #SGD
+        start = time()
+        predictions = model(x_natural) 
+        loss = smooth_crossentropy(predictions,y)
+        loss.backward()
+        optimizer.step()
+        end = time()
+    elif args.isam: # iterative SAM
+        start = time()
+        for step_size in range(args.sam_step_size):
+            loss_sam = smooth_crossentropy(model(x_natural),y)
+            if step_size == 0:
+                loss = loss_sam.item()
+            loss_sam.backward()
+            optimizer.first_step(zero_grad = True) #iterative SAM
+        loss_sam = smooth_crossentropy(model(x_natural),y)
+        loss_sam.backward()
+        optimizer.second_step(zero_grad = True)
+        end = time()
+    else: # SAM
+        # First forward-backward step to climb to local maxima
+        start = time()
+        predictions = model(x_natural) 
+        loss = smooth_crossentropy(predictions, y)
+        loss.backward() 
+        optimizer.first_step(zero_grad=True)
+        loss_sam =smooth_crossentropy(model(x_natural), y)
+        loss_sam.backward()
+        optimizer.second_step(zero_grad=True)
+        end = time()
+    return loss, end-start
+
+def VAL(model: nn.Module,
+           device: torch.device,
+           args: Namespace,
+           x_natural: Tensor,
+           y: Tensor
+           ) -> tuple[float, float, float, Tensor]:
+    # calculate robust loss
+    start = time()
+    predictions = model(x_natural)
+    loss_natural = F.cross_entropy(predictions, y)
+    end = time()
+    return loss_natural.item(), end-start
+
 
 def AT_TRAIN(model: nn.Module,
              device: torch.device,
@@ -79,10 +134,10 @@ def AT_TRAIN(model: nn.Module,
              optimizer: optim.Optimizer
              ) -> tuple[float, float, float, Tensor]:
     # ASAMT
-    # x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
-    #                                 args.perturb_step, args.step_size, args.eps,
-    #                                 x_natural, y, batch_size=len(x_natural))
-    # x_adv.requires_grad = False
+    x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+                                    args.perturb_step, args.step_size, args.eps,
+                                    x_natural, y, batch_size=len(x_natural))
+    x_adv.requires_grad = False
         
     model.train()
     optimizer.zero_grad()
@@ -101,16 +156,26 @@ def AT_TRAIN(model: nn.Module,
         loss = loss_natural + loss_robust
         loss.backward()
         optimizer.step()
+    # elif args.isam:
+    #     for step_size in args.sam_step:
+    #         loss_natural = smooth_crossentropy(predictions,y)
+    #         loss_natural.backward()
+    #         optimizer.first_step(zero_grad = True) #iterative SAM
+    #     loss_sam = smooth_crossentropy(model(x_natural),y)
+    #     loss.backward()
+    #     optimizer.second_step(zero_grad = True)
+    #     return loss.item(), loss_natural.item(), 0, 0
+
     else: # SAM
         # First forward-backward step to climb to local maxima
         loss_natural = smooth_crossentropy(predictions, y)
         loss_natural.backward() 
         optimizer.first_step(zero_grad=True)
         #SAMAT
-        x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
-                                    args.perturb_step, args.step_size, args.eps,
-                                    x_natural, y, batch_size=len(x_natural))
-        x_adv.requires_grad = False
+        # x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+        #                             args.perturb_step, args.step_size, args.eps,
+        #                             x_natural, y, batch_size=len(x_natural))
+        # x_adv.requires_grad = False
         model.train()
         if args.trades:
             # SAMTRADES

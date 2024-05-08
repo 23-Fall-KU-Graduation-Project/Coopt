@@ -7,8 +7,8 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import sys; sys.path.append("..")
-from sam import SAM
-from utility import AT_TRAIN, AT_VAL
+from sam import SAM,ISAM
+from utility import AT_TRAIN, AT_VAL,TRAIN,VAL
 from model.wideresnet import WideResNet
 from data.cifar import Cifar
 from utility import initialize
@@ -42,7 +42,8 @@ def get_arguments() -> tuple[ArgumentParser, Namespace]:
     parser.add_argument("--eps",default=8./255.,type=float,help="PGD epsilon")
     parser.add_argument("--perturb_step",default=10,type=int,help="PGD iteration step")
     parser.add_argument("--distance", default="l_inf", type=str, help="Distance norm to adversarial attack eg) l_2")
-
+    parser.add_argument("--isam",action="store_true",help="Iterative SAM")
+    parser.add_argument('--sam_step_size',default=2,type=int,help="SAM iteration steps")
     args = parser.parse_args()
     return parser, args
 
@@ -90,12 +91,14 @@ def print_progress(batch_size: int,
                    loss_natural: float,
                    loss_robust: float,
                    accuracy: float,
-                   adv_accuracy: float):
+                   adv_accuracy: float,
+                   running_time : float):
     print(" \t ".join((f"Epoch: [{epoch}][{batch_idx}/{batch_size}]",
                                   f"Loss {loss_natural:.3f}",
                                   f"Adv_Loss {loss_robust:.3f}",
                                   f"Acc {accuracy:.3f}",
-                                  f"Adv_Acc {adv_accuracy:.3f}")))
+                                  f"Adv_Acc {adv_accuracy:.3f}",
+                                  f"Batch_Running_Time {running_time:.3f}")))
 
 def adv_learning(mode: str,
               args: Namespace,
@@ -142,6 +145,49 @@ def adv_learning(mode: str,
     writer.add_scalar(f"{mode}/lr", scheduler.get_last_lr(), epoch)
     return results
 
+def learning(mode: str,
+              args: Namespace,
+              model: nn.Module,
+              device: torch.device,
+              scheduler: optim.lr_scheduler,
+              data_loader: DataLoader,
+              optimizer: optim.Optimizer,
+              meters: dict[str, Meter],
+              epoch: int,
+              writer: SummaryWriter) -> None:
+    if mode == "val":
+        model.eval()
+        torch.set_grad_enabled(False)
+    for batch_idx, batch in enumerate(data_loader):
+        x_natural, y = (b.to(device) for b in batch)
+
+        if mode == "train":
+            enable_running_stats(model)
+            loss,batch_running_time = TRAIN(model, device, args, x_natural, y, optimizer)
+        else:
+            loss,batch_running_time = VAL(model, device, args, x_natural, y)
+
+        meters["natural_loss"].cache(loss)
+        meters["robust_loss"].cache(0)
+
+        if (batch_idx % 10) == 0:
+            with torch.no_grad():
+                pred = model(x_natural)
+            accuracy, _ = calculate_acc_adv_acc(meters, y, torch.zeros_like(pred), pred)
+            print_progress(len(data_loader), epoch, batch_idx,
+                           loss, 0, accuracy, 0,batch_running_time)
+    torch.set_grad_enabled(True)
+
+    results = flush_scalar_meters(meters)
+    for k, v in results.items():
+        if k != "best_val":
+            if mode == "train":
+                writer.add_scalar(f"train/{k}", v, epoch)
+            else:
+                writer.add_scalar(f"val/{k}", v, epoch)
+    writer.add_scalar(f"{mode}/lr", scheduler.get_last_lr(), epoch)
+    return results
+
 def main():
     parser, args = get_arguments()
     initialize(seed=42)
@@ -185,6 +231,13 @@ def main():
         used_optimizer = "SGD"
         optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
                                     weight_decay=args.weight_decay, momentum=args.momentum)
+    elif args.isam:
+        used_optimizer = "ISAM"
+        base_optimizer = optim.SGD
+        optimizer = ISAM(model.parameters(), base_optimizer, rho=args.rho,
+                        adaptive=args.adaptive,step_size=args.sam_step_size, lr=args.learning_rate,
+                        momentum=args.momentum, weight_decay=args.weight_decay)
+        print(f'using {used_optimizer}')
     else:
         # SAMAT / SAMTRADES
         used_optimizer = "SAM"
@@ -199,9 +252,14 @@ def main():
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        adv_learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
-        scheduler.step()
-        results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
+        if args.isam:
+            learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
+            scheduler.step()
+            results = learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
+        else:
+            adv_learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
+            scheduler.step()
+            results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
 
         # Save best checkpoint
         if results["top1_accuracy"] > best_val:
