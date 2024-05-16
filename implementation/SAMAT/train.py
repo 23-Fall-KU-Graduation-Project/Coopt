@@ -44,6 +44,7 @@ def get_arguments() -> tuple[ArgumentParser, Namespace]:
     parser.add_argument("--distance", default="l_inf", type=str, help="Distance norm to adversarial attack eg) l_2")
     parser.add_argument("--isam",action="store_true",help="Iterative SAM")
     parser.add_argument('--sam_step_size',default=2,type=int,help="SAM iteration steps")
+    parser.add_argument('--sam',action="store_true",help="use SAM only")
     args = parser.parse_args()
     return parser, args
 
@@ -132,7 +133,7 @@ def adv_learning(mode: str,
                 adv_pred = model(x_adv)
             accuracy, adv_accuracy = calculate_acc_adv_acc(meters, y, adv_pred, pred)
             print_progress(len(data_loader), epoch, batch_idx,
-                           loss_natural, loss_robust, accuracy, adv_accuracy)
+                           loss_natural, loss_robust, accuracy, adv_accuracy,0)
     torch.set_grad_enabled(True)
 
     results = flush_scalar_meters(meters)
@@ -252,14 +253,18 @@ def main():
     for epoch in range(args.epochs):
         val_meters["best_val"].cache(best_val)
 
-        if args.isam:
-            learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
-            scheduler.step()
-            results = learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
-        else:
-            adv_learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
-            scheduler.step()
-            results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
+        # if args.isam:
+        #     learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
+        #     scheduler.step()
+        #     results = learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
+        # elif args.sam:
+        #     learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
+        #     scheduler.step()
+        #     results = learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)    
+        # else:
+        adv_learning("train", args, model, device, scheduler, dataset.train, optimizer, train_meters, epoch, writer)
+        scheduler.step()
+        results = adv_learning("val", args, model, device, scheduler, dataset.test, optimizer, val_meters, epoch, writer)
 
         # Save best checkpoint
         if results["top1_accuracy"] > best_val:

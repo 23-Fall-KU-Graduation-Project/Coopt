@@ -134,15 +134,16 @@ def AT_TRAIN(model: nn.Module,
              optimizer: optim.Optimizer
              ) -> tuple[float, float, float, Tensor]:
     # ASAMT
-    x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
-                                    args.perturb_step, args.step_size, args.eps,
-                                    x_natural, y, batch_size=len(x_natural))
-    x_adv.requires_grad = False
+    # x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+    #                                 args.perturb_step, args.step_size, args.eps,
+    #                                 x_natural, y, batch_size=len(x_natural))
+    # x_adv.requires_grad = False
         
-    model.train()
+    # model.train()
     optimizer.zero_grad()
-    predictions = model(x_natural) 
     if args.sgd:
+        predictions = model(x_natural) 
+
         if args.trades:
             # TRADES
             loss_natural =smooth_crossentropy(predictions,y)
@@ -156,26 +157,45 @@ def AT_TRAIN(model: nn.Module,
         loss = loss_natural + loss_robust
         loss.backward()
         optimizer.step()
-    # elif args.isam:
-    #     for step_size in args.sam_step:
-    #         loss_natural = smooth_crossentropy(predictions,y)
-    #         loss_natural.backward()
-    #         optimizer.first_step(zero_grad = True) #iterative SAM
-    #     loss_sam = smooth_crossentropy(model(x_natural),y)
-    #     loss.backward()
-    #     optimizer.second_step(zero_grad = True)
-    #     return loss.item(), loss_natural.item(), 0, 0
+    elif args.isam:
+        for step_size in range(args.sam_step_size):
+            loss_sam = smooth_crossentropy(model(x_natural),y)
+            if step_size == 0:
+                loss_natural = loss_sam
+            loss_sam.backward()
+            optimizer.first_step(zero_grad = True) #iterative SAM
+        #SAMAT
+        x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+                                    args.perturb_step, args.step_size, args.eps,
+                                    x_natural, y, batch_size=len(x_natural))
+        x_adv.requires_grad = False
+        model.train()
+
+        if args.trades:
+            # SAMTRADES
+            loss_robust = args.beta * F.kl_div(F.log_softmax(model(x_adv), dim=1),
+                                               F.softmax(model(x_natural), dim=1),
+                                               reduction='batchmean')
+        else:
+            # SAMAT
+            loss_robust = smooth_crossentropy(model(x_adv),y)
+        loss_sam = smooth_crossentropy(model(x_natural),y)
+        loss = loss_sam + loss_robust
+        loss.backward()
+        optimizer.second_step(zero_grad = True)
+        return loss.item(), loss_natural.item(), loss_robust.item(), x_adv
 
     else: # SAM
+        predictions = model(x_natural) 
         # First forward-backward step to climb to local maxima
         loss_natural = smooth_crossentropy(predictions, y)
         loss_natural.backward() 
         optimizer.first_step(zero_grad=True)
         #SAMAT
-        # x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
-        #                             args.perturb_step, args.step_size, args.eps,
-        #                             x_natural, y, batch_size=len(x_natural))
-        # x_adv.requires_grad = False
+        x_adv = get_adversarial_examples(model, device, args.trades, args.distance,
+                                    args.perturb_step, args.step_size, args.eps,
+                                    x_natural, y, batch_size=len(x_natural))
+        x_adv.requires_grad = False
         model.train()
         if args.trades:
             # SAMTRADES
