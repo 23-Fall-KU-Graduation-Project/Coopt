@@ -70,6 +70,48 @@ def get_adversarial_examples(model: nn.Module,
         x_adv = torch.clamp(x_adv, 0.0, 1.0)
     return x_adv
 
+def get_adversarial_attack(model: nn.Module,
+                           device: torch.device,
+                           is_trades: bool,
+                           perturb_step: int,
+                           epsilon: float,
+                           x_natural: Tensor,
+                           y: Tensor):
+    step_size = 2/255
+    model.eval()
+    x_adv = x_natural.detach() + 0.001 * torch.randn(x_natural.shape).to(device).detach()
+    for _ in range(perturb_step):
+        x_adv.requires_grad_()
+        with torch.enable_grad():
+            if is_trades:
+                loss = F.kl_div(F.log_softmax(model(x_adv), dim=1),
+                                F.softmax(model(x_natural), dim=1),
+                                reduction='sum')
+            else:
+                loss = smooth_crossentropy(model(x_adv),y,0)
+        grad = torch.autograd.grad(loss, [x_adv])[0]
+        x_adv = x_adv.detach() + step_size * torch.sign(grad.detach())
+        x_adv = torch.min(torch.max(x_adv, x_natural - epsilon), x_natural + epsilon)
+        x_adv = torch.clamp(x_adv, 0.0, 1.0)
+    attack = x_adv - x_natural
+    return attack, x_adv
+
+def get_adversarial_attack_ndb(model, device, is_trades, perturb_step, epsilon, x_natural, y):
+    alpha = 2/255
+    x = x_natural.detach()
+    x = x + torch.zeros_like(x).uniform_(-epsilon, epsilon).to(device)
+    for i in range(perturb_step):
+        x.requires_grad_()
+        with torch.enable_grad():
+            logits = model(x)
+            loss = F.cross_entropy(logits, y)
+        grad = torch.autograd.grad(loss, [x])[0]
+        x = x.detach() + alpha * torch.sign(grad.detach())
+        x = torch.min(torch.max(x, x_natural - epsilon), x_natural + epsilon)
+        x = torch.clamp(x, 0, 1)
+    attack = x - x_natural
+    return attack, x
+
 
 def AT_TRAIN(model: nn.Module,
              device: torch.device,

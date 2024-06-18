@@ -1,0 +1,20 @@
+standard:
+  parameter_path: ../test/checkpoint/sgd.pth
+  is_state_dict: False
+  is_trades: False
+# sam:
+#   parameter_path: ../test/checkpoint/sam.pth
+#   is_state_dict: False
+#   is_trades: False
+trades:
+  parameter_path: ../test/checkpoint/TRADES_4.0.pth
+  is_state_dict: False
+  is_trades: True
+samat:
+  parameter_path: ../test/checkpoint/SAMAT_TRADES_4.0.pth
+  is_state_dict: False
+  is_trades: True
+awp:
+  parameter_path: ../test/checkpoint/AWP_TRADES_4.0.pt
+  is_state_dict: True
+  is_trades: True
