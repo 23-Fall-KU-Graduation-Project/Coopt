@@ -24,6 +24,3 @@
 - [Adversarial Weight Perturbation Helps Robust Generalization](https://arxiv.org/abs/2004.05884), NIPS 20’
 - [Theoretically Principled Trade-off between Robustness and Accuracy](https://arxiv.org/abs/1901.08573), ICML 20'
 
-
-## Links
-[OneDrive](https://konkukackr-my.sharepoint.com/:f:/r/personal/kwan7595_konkuk_ac_kr/Documents/kwan/2023-2/%EC%A1%B8%EC%97%85%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B81?csf=1&web=1&e=dO1QsE)
