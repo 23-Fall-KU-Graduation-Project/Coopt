@@ -1,5 +1,5 @@
 # Coopt
-23-Fall Konkuk University CSE Graduation Project
+2023/24 Konkuk University CSE Graduation Project
 
 # Member
 - 이관희, [kwan7595](https://github.com/kwan7595), Lead
